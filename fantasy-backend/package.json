@@ -1,0 +1,35 @@
+{
+  "name": "fantasy-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --runInBand --forceExit",
+    "seed:players": "node scripts/seed.js",
+    "seed:teams": "node scripts/seedTeams.js",
+    "seed:curated": "node scripts/seedCuratedPlayers.js",
+    "seed:top5": "node scripts/seedFootballData.js",
+    "seed:top5-free": "node scripts/seedTop5Free.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "axios": "^1.16.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "node-cron": "^4.2.1",
+    "redis": "^6.0.0",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "prisma": "^5.22.0",
+    "supertest": "^7.2.2"
+  }
+}

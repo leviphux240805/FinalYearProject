@@ -1,0 +1,76 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id             String        @id @default(uuid())
+  username       String        @unique
+  passwordHash   String
+  virtualBalance Decimal       @default(10.0) @db.Decimal(5, 1)
+  penaltyPoints  Int           @default(0)
+  squads         UserSquad[]
+  transactions   Transaction[]
+  createdAt      DateTime      @default(now())
+}
+
+model Player {
+  id           Int           @id
+  name         String
+  position     String        // GK, DEF, MID, FWD
+  currentPrice Decimal       @db.Decimal(5, 1)
+  teamId       Int           // Không đặt FK cứng tới Team: scripts/seed.js còn nạp
+                              // cầu thủ thật từ Sportmonks với teamId nằm ngoài
+                              // phạm vi 10 CLB curated trong bảng Team bên dưới.
+  form         String[]
+  squadPicks   SquadPick[]
+  transactions Transaction[]
+}
+
+// Phục vụ Algorithm 3 (Tactical Fit Analyzer, Section 5.4). Chỉ curate cho
+// 10 CLB dùng trong BACKUP_PLAYERS — TacticalFitService dùng chỉ số trung
+// bình giải đấu khi không tìm thấy Team tương ứng với teamId của cầu thủ.
+model Team {
+  id               Int     @id
+  name             String
+  possessionRate   Decimal @db.Decimal(5, 2)
+  defensiveBlock   Decimal @db.Decimal(5, 2)
+  attackingPassing Decimal @db.Decimal(5, 2)
+  counterAttack    Decimal @db.Decimal(5, 2)
+}
+
+model UserSquad {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  gameweek  Int
+  captainId Int?
+  isLocked  Boolean     @default(false)
+  picks     SquadPick[]
+
+  @@unique([userId, gameweek]) // Mỗi user chỉ có 1 đội hình duy nhất mỗi vòng
+}
+
+model SquadPick {
+  id         String    @id @default(uuid())
+  squadId    String
+  squad      UserSquad @relation(fields: [squadId], references: [id])
+  playerId   Int
+  player     Player    @relation(fields: [playerId], references: [id])
+  isStarting Boolean   @default(true)
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  playerId  Int?
+  player    Player?  @relation(fields: [playerId], references: [id])
+  type      String   // BUY, SELL, BNPL_LOAN
+  amount    Decimal  @db.Decimal(5, 1)
+  createdAt DateTime @default(now())
+}
