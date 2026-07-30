@@ -1,7 +1,7 @@
 // Curated MVP dataset (Section 2.4) — shared between /api/players,
 // /api/gacha/open, and the TacticalFitService fallback path.
 module.exports = [
-    // ================= THỦ MÔN (GK) =================
+    // ================= GOALKEEPERS (GK) =================
     { id: 1,  name: 'Alisson Becker',      position: 'GK',  price: 5.5,  team_id: 5,  form: ['W','W','D'], stats: { xG: 0.04, xA: 0.08, form: 0.82, keyPasses: 0.18, shots: 0.08 } },
     { id: 2,  name: 'David Raya',          position: 'GK',  price: 5.0,  team_id: 2,  form: ['W','W','W'], stats: { xG: 0.05, xA: 0.10, form: 0.80, keyPasses: 0.20, shots: 0.10 } },
     { id: 3,  name: 'Ederson',             position: 'GK',  price: 5.5,  team_id: 4,  form: ['D','W','W'], stats: { xG: 0.03, xA: 0.12, form: 0.88, keyPasses: 0.22, shots: 0.06 } },
@@ -52,7 +52,7 @@ module.exports = [
     { id: 47, name: 'Anthony Gordon',      position: 'MID', price: 7.5,  team_id: 9,  form: ['L','W','W'], stats: { xG: 0.55, xA: 0.50, form: 0.72, keyPasses: 0.62, shots: 0.60 } },
     { id: 48, name: 'Vitinha',             position: 'MID', price: 6.5,  team_id: 1,  form: ['W','W','W'], stats: { xG: 0.35, xA: 0.62, form: 0.88, keyPasses: 0.85, shots: 0.40 } },
 
-    // ================= TIỀN ĐẠO (FWD) =================
+    // ================= FORWARDS (FWD) =================
     { id: 51, name: 'Erling Haaland',      position: 'FWD', price: 14.0, team_id: 4,  form: ['W','W','L'], stats: { xG: 0.95, xA: 0.30, form: 0.80, keyPasses: 0.45, shots: 0.95 } },
     { id: 52, name: 'Kylian Mbappé',       position: 'FWD', price: 13.0, team_id: 6,  form: ['W','W','W'], stats: { xG: 0.88, xA: 0.42, form: 0.90, keyPasses: 0.60, shots: 0.92 } },
     { id: 53, name: 'Harry Kane',          position: 'FWD', price: 12.5, team_id: 7,  form: ['D','W','W'], stats: { xG: 0.85, xA: 0.48, form: 0.82, keyPasses: 0.65, shots: 0.88 } },

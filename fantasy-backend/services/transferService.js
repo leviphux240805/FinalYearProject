@@ -12,10 +12,19 @@ const MAX_BNPL_OVERDRAFT = 2.0;
 const MAX_PLAYERS_PER_CLUB = 3;
 const DEFAULT_GAMEWEEK = 1;
 const SELL_RESALE_RATE = 0.9;
+// Matches canAddPlayer() on the frontend (store.js) — previously this was
+// ONLY enforced on the client, so anyone calling POST /api/transfers/process
+// directly (Postman, a script...) could bypass it entirely. Now enforced
+// here too, as the single source of truth.
+const POSITION_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 };
+const MAX_SQUAD_SIZE = Object.values(POSITION_LIMITS).reduce((a, b) => a + b, 0); // 15
 
 class NotFoundError extends Error {}
 class InsufficientFundsError extends Error {}
 class ClubLimitError extends Error {}
+class SquadLockedError extends Error {}
+class PositionLimitError extends Error {}
+class SquadSizeError extends Error {}
 
 async function getOrCreateActiveSquad(tx, userId) {
   return tx.userSquad.upsert({
@@ -44,9 +53,9 @@ async function _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock
     playerIdToSell ? tx.player.findUnique({ where: { id: playerIdToSell } }) : Promise.resolve(null)
   ]);
 
-  if (!user) throw new NotFoundError('Không tìm thấy tài khoản người dùng.');
-  if (!playerBuy) throw new NotFoundError(`Không tìm thấy cầu thủ cần mua (ID: ${playerIdToBuy}).`);
-  if (playerIdToSell && !playerSell) throw new NotFoundError(`Không tìm thấy cầu thủ cần bán (ID: ${playerIdToSell}).`);
+  if (!user) throw new NotFoundError('User account not found.');
+  if (!playerBuy) throw new NotFoundError(`Player to buy not found (ID: ${playerIdToBuy}).`);
+  if (playerIdToSell && !playerSell) throw new NotFoundError(`Player to sell not found (ID: ${playerIdToSell}).`);
 
   // Test-only: widens the window between read and write so two concurrent
   // unlocked transactions actually overlap instead of running back-to-back
@@ -56,18 +65,37 @@ async function _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock
     await new Promise(resolve => setTimeout(resolve, raceDelayMs));
   }
 
+  // Fetch the most recent squad WITHOUT pre-filtering by isLocked, so we can
+  // distinguish "no squad yet" (squad === null, allowed to create a new one)
+  // from "squad already locked after running Matchday" (must be blocked,
+  // must not silently create a new SquadPick on top of an already-scored squad).
   const squad = await tx.userSquad.findFirst({
-    where: { userId, isLocked: false },
+    where: { userId },
     orderBy: { gameweek: 'desc' },
     include: { picks: { include: { player: true } } }
   });
+  if (squad && squad.isLocked) {
+    throw new SquadLockedError('This squad is locked after Matchday was run for this gameweek. Cannot buy/sell players.');
+  }
   const existingPicks = squad ? squad.picks : [];
 
   const sameClubCount = existingPicks.filter(
     p => p.playerId !== playerIdToSell && p.player.teamId === playerBuy.teamId
   ).length;
   if (sameClubCount >= MAX_PLAYERS_PER_CLUB) {
-    throw new ClubLimitError(`Bạn đã sở hữu tối đa ${MAX_PLAYERS_PER_CLUB} cầu thủ từ CLB này.`);
+    throw new ClubLimitError(`You already own the maximum of ${MAX_PLAYERS_PER_CLUB} players from this club.`);
+  }
+
+  const otherPicks = existingPicks.filter(p => p.playerId !== playerIdToSell);
+
+  const samePositionCount = otherPicks.filter(p => p.player.position === playerBuy.position).length;
+  const positionLimit = POSITION_LIMITS[playerBuy.position];
+  if (positionLimit !== undefined && samePositionCount >= positionLimit) {
+    throw new PositionLimitError(`You already have the maximum of ${positionLimit} players in the ${playerBuy.position} position.`);
+  }
+
+  if (otherPicks.length + 1 > MAX_SQUAD_SIZE) {
+    throw new SquadSizeError(`The squad is capped at ${MAX_SQUAD_SIZE} players (already full).`);
   }
 
   const currentBalance = Number(user.virtualBalance);
@@ -79,7 +107,7 @@ async function _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock
   if (shortfall > 0) {
     if (shortfall > MAX_BNPL_OVERDRAFT) {
       throw new InsufficientFundsError(
-        `Số dư không đủ! Thiếu $${shortfall.toFixed(1)}M. Hạn mức thấu chi tối đa là $${MAX_BNPL_OVERDRAFT.toFixed(1)}M.`
+        `Insufficient balance! You're short $${shortfall.toFixed(1)}M. The maximum overdraft limit is $${MAX_BNPL_OVERDRAFT.toFixed(1)}M.`
       );
     }
     await tx.user.update({
@@ -148,12 +176,15 @@ async function executeSell({ userId, playerId }) {
       tx.user.findUnique({ where: { id: userId } }),
       tx.player.findUnique({ where: { id: playerId } })
     ]);
-    if (!user) throw new NotFoundError('Không tìm thấy tài khoản người dùng.');
-    if (!player) throw new NotFoundError(`Không tìm thấy cầu thủ (ID: ${playerId}).`);
+    if (!user) throw new NotFoundError('User account not found.');
+    if (!player) throw new NotFoundError(`Player not found (ID: ${playerId}).`);
 
-    const squad = await tx.userSquad.findFirst({ where: { userId, isLocked: false }, orderBy: { gameweek: 'desc' } });
+    const squad = await tx.userSquad.findFirst({ where: { userId }, orderBy: { gameweek: 'desc' } });
+    if (squad && squad.isLocked) {
+      throw new SquadLockedError('This squad is locked after Matchday was run for this gameweek. Cannot sell players.');
+    }
     const pick = squad ? await tx.squadPick.findFirst({ where: { squadId: squad.id, playerId } }) : null;
-    if (!pick) throw new NotFoundError('Cầu thủ này không có trong đội hình của bạn.');
+    if (!pick) throw new NotFoundError('This player is not in your squad.');
 
     const sellPrice = parseFloat((Number(player.currentPrice) * SELL_RESALE_RATE).toFixed(1));
     const newBalance = parseFloat((Number(user.virtualBalance) + sellPrice).toFixed(1));
@@ -177,6 +208,11 @@ module.exports = {
   NotFoundError,
   InsufficientFundsError,
   ClubLimitError,
+  SquadLockedError,
+  PositionLimitError,
+  SquadSizeError,
   MAX_BNPL_OVERDRAFT,
-  MAX_PLAYERS_PER_CLUB
+  MAX_PLAYERS_PER_CLUB,
+  POSITION_LIMITS,
+  MAX_SQUAD_SIZE
 };

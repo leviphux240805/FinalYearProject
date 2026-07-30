@@ -1,40 +1,40 @@
 <template>
   <div class="comparison-container">
     <div class="comparison-header">
-      <h2>⚖️ Trung tâm Phân tích & So sánh</h2>
-      <p>Chọn 2 cầu thủ cùng vị trí để đối chiếu các chỉ số chuyên sâu</p>
+      <h2>⚖️ Analytics & Comparison Center</h2>
+      <p>Pick 2 players in the same position to compare their in-depth stats</p>
     </div>
 
     <div class="selector-section">
       <div class="player-select-box">
-        <label>Cầu thủ 1 (Màu Xanh):</label>
+        <label>Player 1 (Blue):</label>
         <select v-model="selectedPlayer1" @change="updateChart" class="custom-select p1-select">
-          <option :value="null" disabled>-- Chọn cầu thủ --</option>
-          <option v-for="p in store.squad" :key="'p1s' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Đội hình</option>
-          <option v-for="p in marketPlayers" :key="'p1m' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Thị trường</option>
+          <option :value="null" disabled>-- Select a player --</option>
+          <option v-for="p in store.squad" :key="'p1s' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Squad</option>
+          <option v-for="p in marketPlayers" :key="'p1m' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Market</option>
         </select>
       </div>
 
       <div class="vs-badge">VS</div>
 
       <div class="player-select-box">
-        <label>Cầu thủ 2 (Màu Đỏ):</label>
+        <label>Player 2 (Red):</label>
         <select v-model="selectedPlayer2" @change="updateChart" class="custom-select p2-select">
-          <option :value="null" disabled>-- Chọn cầu thủ --</option>
-          <option v-for="p in marketPlayers" :key="'p2m' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Thị trường</option>
-          <option v-for="p in store.squad" :key="'p2s' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Đội hình</option>
+          <option :value="null" disabled>-- Select a player --</option>
+          <option v-for="p in marketPlayers" :key="'p2m' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Market</option>
+          <option v-for="p in store.squad" :key="'p2s' + p.id" :value="p">{{ p.name }} ({{ p.position }}) - Squad</option>
         </select>
       </div>
     </div>
 
-    <!-- Biểu đồ Radar -->
+    <!-- Radar Chart -->
     <div class="chart-wrapper" v-show="selectedPlayer1 && selectedPlayer2">
       <div class="chart-box">
         <canvas ref="compareCanvas"></canvas>
       </div>
     </div>
 
-    <!-- Tactical Fit (Algorithm 3, tính server-side) -->
+    <!-- Tactical Fit (Algorithm 3, computed server-side) -->
     <div class="tactical-fit-row" v-if="selectedPlayer1 && selectedPlayer2">
       <div class="tactical-fit-card p1-fit">
         <span class="fit-label">Tactical Fit — {{ selectedPlayer1.name }}</span>
@@ -48,14 +48,52 @@
       </div>
     </div>
 
-    <!-- Bảng so sánh chi tiết (thay đổi theo vị trí) -->
+    <!-- PROJECTED POINTS (feedback item A7 — "so sánh cầu thủ phải dựa vào
+         tổng điểm dự đoán theo từng vòng dựa trên tiên đoán kết quả trận
+         đấu", not just historical form/xG) -->
+    <div class="projected-section" v-if="selectedPlayer1 && selectedPlayer2">
+      <div class="projected-header">
+        <h4>🔮 Projected Points — Next Gameweeks</h4>
+        <span class="projected-note" title="Heuristic estimate from club fixture strength, not a guarantee — see predictionService.js">estimate, not a guarantee</span>
+      </div>
+      <div v-if="projectedLoading" class="projected-loading">Loading projections...</div>
+      <template v-else-if="projectedGameweeks.length > 0">
+        <div class="projected-totals">
+          <div class="projected-total-card p1-fit">
+            <span class="fit-label">{{ selectedPlayer1.name }}</span>
+            <span class="fit-score">{{ projectedTotal1 }}</span>
+          </div>
+          <div class="projected-total-card p2-fit">
+            <span class="fit-label">{{ selectedPlayer2.name }}</span>
+            <span class="fit-score">{{ projectedTotal2 }}</span>
+          </div>
+        </div>
+        <table class="compare-table projected-table">
+          <thead>
+            <tr><th>GW</th><th>{{ selectedPlayer1.name }}</th><th>Opponent</th><th>{{ selectedPlayer2.name }}</th><th>Opponent</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in projectedRows" :key="row.gameweek">
+              <td class="stat-label">GW{{ row.gameweek }}</td>
+              <td :class="{ winner: row.p1.projectedPoints > row.p2.projectedPoints }">{{ row.p1.hasFixture ? row.p1.projectedPoints : '—' }}</td>
+              <td class="stat-label">{{ row.p1.hasFixture ? (row.p1.isHome ? 'vs ' + row.p1.opponent : '@ ' + row.p1.opponent) : 'No fixture' }}</td>
+              <td :class="{ winner: row.p2.projectedPoints > row.p1.projectedPoints }">{{ row.p2.hasFixture ? row.p2.projectedPoints : '—' }}</td>
+              <td class="stat-label">{{ row.p2.hasFixture ? (row.p2.isHome ? 'vs ' + row.p2.opponent : '@ ' + row.p2.opponent) : 'No fixture' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+      <p v-else class="empty-state small">No upcoming fixtures scheduled yet to project from.</p>
+    </div>
+
+    <!-- Detailed comparison table (changes by position) -->
     <div class="stats-table-wrapper" v-if="selectedPlayer1 && selectedPlayer2">
-      <div class="position-badge">{{ positionLabel }} — Bộ chỉ số chuyên biệt</div>
+      <div class="position-badge">{{ positionLabel }} — Specialized Stats</div>
       <table class="compare-table">
         <thead>
           <tr>
             <th class="p1-header">{{ selectedPlayer1.name }}</th>
-            <th>CHỈ SỐ</th>
+            <th>STAT</th>
             <th class="p2-header">{{ selectedPlayer2.name }}</th>
           </tr>
         </thead>
@@ -74,14 +112,14 @@
     </div>
 
     <div v-else class="empty-state">
-      Vui lòng chọn đủ 2 cầu thủ để xem bảng so sánh và phân tích.
+      Please select 2 players to see the comparison table and analytics.
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
-import { globalStore } from '../store';
+import { ref, computed, onMounted, nextTick } from 'vue';
+import { globalStore, API_BASE } from '../store';
 import Chart from 'chart.js/auto';
 
 const store = globalStore;
@@ -102,24 +140,73 @@ const tacticalFit2 = ref(null);
 const tacticalFitTeam1 = ref('');
 const tacticalFitTeam2 = ref('');
 
+// Projected points state (feedback item A7)
+const availableGameweeks = ref([]);
+const projectedLoading = ref(false);
+const projectedRows = ref([]); // [{ gameweek, p1: {...}, p2: {...} }]
+const projectedTotal1 = ref(0);
+const projectedTotal2 = ref(0);
+const projectedGameweeks = computed(() => projectedRows.value);
+
+const fetchProjectedPoints = async (player) => {
+  if (availableGameweeks.value.length === 0) return { breakdown: [], totalProjectedPoints: 0 };
+  try {
+    const gwParam = availableGameweeks.value.join(',');
+    const res = await fetch(`${API_BASE}/players/${player.id}/projected-points?gameweeks=${gwParam}`);
+    const data = await res.json();
+    if (!data.success) return { breakdown: [], totalProjectedPoints: 0 };
+    return data;
+  } catch (err) {
+    console.error('[PlayerComparison] Could not load projected points:', err.message);
+    return { breakdown: [], totalProjectedPoints: 0 };
+  }
+};
+
+const updateProjectedPoints = async () => {
+  if (!selectedPlayer1.value || !selectedPlayer2.value) return;
+  projectedLoading.value = true;
+  try {
+    const [r1, r2] = await Promise.all([
+      fetchProjectedPoints(selectedPlayer1.value),
+      fetchProjectedPoints(selectedPlayer2.value),
+    ]);
+    projectedTotal1.value = r1.totalProjectedPoints || 0;
+    projectedTotal2.value = r2.totalProjectedPoints || 0;
+    projectedRows.value = availableGameweeks.value.map((gw) => ({
+      gameweek: gw,
+      p1: r1.breakdown?.find(b => b.gameweek === gw) || { hasFixture: false, projectedPoints: 0 },
+      p2: r2.breakdown?.find(b => b.gameweek === gw) || { hasFixture: false, projectedPoints: 0 },
+    }));
+  } finally {
+    projectedLoading.value = false;
+  }
+};
+
 const fetchTacticalFit = async (player) => {
   try {
-    const res = await fetch(`http://localhost:3000/api/players/${player.id}/tactical-fit`);
+    const res = await fetch(`${API_BASE}/players/${player.id}/tactical-fit`);
     const data = await res.json();
     if (!data.success) return { score: null, teamName: '' };
     return { score: data.score, teamName: data.teamName || '' };
   } catch (err) {
-    console.error('[PlayerComparison] Không thể tải Tactical Fit:', err.message);
+    console.error('[PlayerComparison] Could not load Tactical Fit:', err.message);
     return { score: null, teamName: '' };
   }
 };
 
 onMounted(async () => {
   try {
-    const res = await fetch('http://localhost:3000/api/players');
+    const res = await fetch(`${API_BASE}/players`);
     marketPlayers.value = await res.json();
   } catch (err) {
-    console.error('[PlayerComparison] Không thể tải danh sách cầu thủ:', err.message);
+    console.error('[PlayerComparison] Could not load player list:', err.message);
+  }
+  try {
+    const res = await fetch(`${API_BASE}/fixtures/gameweeks`);
+    const data = await res.json();
+    if (data.success) availableGameweeks.value = data.gameweeks;
+  } catch (err) {
+    console.error('[PlayerComparison] Could not load gameweek list:', err.message);
   }
 });
 
@@ -131,18 +218,18 @@ const getFormScore = (formArray) => {
   return formArray.reduce((acc, val) => acc + (val === 'W' ? 3 : val === 'D' ? 1 : 0), 0);
 };
 
-// Giá trị tối đa thực tế theo từng vị trí để chuẩn hóa radar về 0-100
+// Realistic max value per position, used to normalize the radar to 0-100
 const normalize = (value, max) => Math.min(100, Math.round((value / (max || 1)) * 100));
 const formPct   = (player) => Math.round(getFormScore(player.form) / 9 * 100);
 const valuePct  = (player) => Math.min(100, Math.round((15 - getPlayerPrice(player)) / 15 * 100));
 
 // ============================================================
-// BỘ CHỈ SỐ CHUYÊN BIỆT THEO VỊ TRÍ
+// POSITION-SPECIFIC STAT SETS
 // ============================================================
 const POSITION_CONFIG = {
   GK: {
-    name: '🧤 Thủ Môn (GK)',
-    labels: ['Phân phối', 'Ổn định', 'Phong độ', 'Phản xạ', 'Hiệu quả giá'],
+    name: '🧤 Goalkeeper (GK)',
+    labels: ['Distribution', 'Consistency', 'Form', 'Reflexes', 'Value for Money'],
     getScores: (p, s) => [
       normalize(+s.keyPasses, 0.25),
       normalize(1 - +s.xG,   0.99),
@@ -151,16 +238,16 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Giá tiền (Rẻ hơn là Tốt)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
-      { label: 'Phong độ (3 trận)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
-      { label: 'Phân phối (Key Passes)',     v1: s1.keyPasses,              v2: s2.keyPasses,              p1wins: +s1.keyPasses > +s2.keyPasses, p2wins: +s2.keyPasses > +s1.keyPasses },
-      { label: 'Phản xạ (Shots)',            v1: s1.shots,                  v2: s2.shots,                  p1wins: +s1.shots > +s2.shots,         p2wins: +s2.shots > +s1.shots },
-      { label: 'Ổn định (xG thấp = Tốt)',   v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG < +s2.xG,              p2wins: +s2.xG < +s1.xG },
+      { label: 'Price (Cheaper is Better)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Form (last 3 matches)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
+      { label: 'Distribution (Key Passes)',     v1: s1.keyPasses,              v2: s2.keyPasses,              p1wins: +s1.keyPasses > +s2.keyPasses, p2wins: +s2.keyPasses > +s1.keyPasses },
+      { label: 'Reflexes (Shots)',            v1: s1.shots,                  v2: s2.shots,                  p1wins: +s1.shots > +s2.shots,         p2wins: +s2.shots > +s1.shots },
+      { label: 'Consistency (lower xG = Better)',   v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG < +s2.xG,              p2wins: +s2.xG < +s1.xG },
     ],
   },
   DEF: {
-    name: '🛡️ Hậu Vệ (DEF)',
-    labels: ['Tấn công (xG)', 'Kiến tạo (xA)', 'Phong độ', 'Chuyền bóng', 'Hiệu quả giá'],
+    name: '🛡️ Defender (DEF)',
+    labels: ['Attack (xG)', 'Creativity (xA)', 'Form', 'Passing', 'Value for Money'],
     getScores: (p, s) => [
       normalize(+s.xG,        0.35),
       normalize(+s.xA,        0.60),
@@ -169,16 +256,16 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Giá tiền (Rẻ hơn là Tốt)',    v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
-      { label: 'Phong độ (3 trận)',            v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
-      { label: 'Tấn công Kỳ vọng (xG)',       v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,              p2wins: +s2.xG > +s1.xG },
-      { label: 'Kiến tạo Kỳ vọng (xA)',       v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,              p2wins: +s2.xA > +s1.xA },
-      { label: 'Chuyền bóng (Key Passes)',     v1: s1.keyPasses,              v2: s2.keyPasses,              p1wins: +s1.keyPasses > +s2.keyPasses, p2wins: +s2.keyPasses > +s1.keyPasses },
+      { label: 'Price (Cheaper is Better)',    v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Form (last 3 matches)',            v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
+      { label: 'Expected Goals (xG)',       v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,              p2wins: +s2.xG > +s1.xG },
+      { label: 'Expected Assists (xA)',       v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,              p2wins: +s2.xA > +s1.xA },
+      { label: 'Passing (Key Passes)',     v1: s1.keyPasses,              v2: s2.keyPasses,              p1wins: +s1.keyPasses > +s2.keyPasses, p2wins: +s2.keyPasses > +s1.keyPasses },
     ],
   },
   MID: {
-    name: '⚡ Tiền Vệ (MID)',
-    labels: ['Ghi bàn (xG)', 'Kiến tạo (xA)', 'Phong độ', 'Chuyền bóng', 'Hiệu quả giá'],
+    name: '⚡ Midfielder (MID)',
+    labels: ['Goals (xG)', 'Assists (xA)', 'Form', 'Passing', 'Value for Money'],
     getScores: (p, s) => [
       normalize(+s.xG,        0.85),
       normalize(+s.xA,        0.96),
@@ -187,16 +274,16 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Giá tiền (Rẻ hơn là Tốt)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
-      { label: 'Phong độ (3 trận)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
-      { label: 'Ghi bàn Kỳ vọng (xG)',      v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,              p2wins: +s2.xG > +s1.xG },
-      { label: 'Kiến tạo Kỳ vọng (xA)',     v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,              p2wins: +s2.xA > +s1.xA },
-      { label: 'Chuyền bóng (Key Passes)',   v1: s1.keyPasses,              v2: s2.keyPasses,              p1wins: +s1.keyPasses > +s2.keyPasses, p2wins: +s2.keyPasses > +s1.keyPasses },
+      { label: 'Price (Cheaper is Better)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Form (last 3 matches)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
+      { label: 'Expected Goals (xG)',      v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,              p2wins: +s2.xG > +s1.xG },
+      { label: 'Expected Assists (xA)',     v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,              p2wins: +s2.xA > +s1.xA },
+      { label: 'Passing (Key Passes)',   v1: s1.keyPasses,              v2: s2.keyPasses,              p1wins: +s1.keyPasses > +s2.keyPasses, p2wins: +s2.keyPasses > +s1.keyPasses },
     ],
   },
   FWD: {
-    name: '⚽ Tiền Đạo (FWD)',
-    labels: ['Ghi bàn (xG)', 'Sút bóng', 'Phong độ', 'Kiến tạo (xA)', 'Hiệu quả giá'],
+    name: '⚽ Forward (FWD)',
+    labels: ['Goals (xG)', 'Shooting', 'Form', 'Assists (xA)', 'Value for Money'],
     getScores: (p, s) => [
       normalize(+s.xG,    1.00),
       normalize(+s.shots, 1.00),
@@ -205,11 +292,11 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Giá tiền (Rẻ hơn là Tốt)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
-      { label: 'Phong độ (3 trận)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
-      { label: 'Ghi bàn Kỳ vọng (xG)',      v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,   p2wins: +s2.xG > +s1.xG },
-      { label: 'Số lần Sút (Shots)',         v1: s1.shots,                  v2: s2.shots,                  p1wins: +s1.shots > +s2.shots, p2wins: +s2.shots > +s1.shots },
-      { label: 'Kiến tạo Kỳ vọng (xA)',     v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,   p2wins: +s2.xA > +s1.xA },
+      { label: 'Price (Cheaper is Better)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Form (last 3 matches)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
+      { label: 'Expected Goals (xG)',      v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,   p2wins: +s2.xG > +s1.xG },
+      { label: 'Shots on Target',         v1: s1.shots,                  v2: s2.shots,                  p1wins: +s1.shots > +s2.shots, p2wins: +s2.shots > +s1.shots },
+      { label: 'Expected Assists (xA)',     v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,   p2wins: +s2.xA > +s1.xA },
     ],
   },
 };
@@ -249,8 +336,10 @@ const updateChart = async () => {
   tacticalFit2.value = null;
   fetchTacticalFit(p1).then(({ score, teamName }) => { tacticalFit1.value = score; tacticalFitTeam1.value = teamName; });
   fetchTacticalFit(p2).then(({ score, teamName }) => { tacticalFit2.value = score; tacticalFitTeam2.value = teamName; });
+  updateProjectedPoints();
 
-  // Dùng vị trí P1 làm chuẩn (nếu 2 cầu thủ khác vị trí, dùng vị trí P1)
+  // Use P1's position as the baseline (if the two players are in different
+  // positions, P1's position is used)
   const pos    = p1.position || 'MID';
   const config = POSITION_CONFIG[pos] || POSITION_CONFIG.MID;
 
@@ -414,6 +503,17 @@ const updateChart = async () => {
 .fit-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #a4b0be; }
 .fit-score { font-size: 26px; font-weight: 900; color: #f7b731; }
 .fit-team { font-size: 12px; color: #636e72; }
+
+/* Projected points (feedback item A7) */
+.projected-section { background: #2d3436; border: 1px solid #636e72; border-radius: 12px; padding: 16px 18px; margin-bottom: 20px; }
+.projected-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 6px; }
+.projected-header h4 { font-size: 15px; color: #f7b731; margin: 0; }
+.projected-note { font-size: 11px; color: #7f8fa6; font-style: italic; }
+.projected-loading { font-size: 12px; color: #a4b0be; font-style: italic; }
+.projected-totals { display: flex; gap: 16px; margin-bottom: 14px; }
+.projected-total-card { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px; border-radius: 10px; background: #1e272e; border: 1px solid #636e72; }
+.projected-table th, .projected-table td { font-size: 12.5px; }
+.empty-state.small { padding: 20px; font-size: 13px; }
 
 /* Comparison table */
 .stats-table-wrapper { overflow: hidden; border-radius: 12px; border: 1px solid #636e72; }

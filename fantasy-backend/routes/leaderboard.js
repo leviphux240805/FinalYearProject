@@ -4,20 +4,20 @@ const { authenticateToken } = require('../middleware/authMiddleware');
 
 // ================================================================
 // GET /api/leaderboard
-// Lấy Top 50 người chơi từ Redis Sorted Set
-// Độ phức tạp: O(log N) - Chạy trong < 1ms dù có 100,000 người chơi
+// Fetches the Top 50 players from the Redis Sorted Set
+// Complexity: O(log N) - Runs in < 1ms even with 100,000 players
 // ================================================================
 router.get('/', async (req, res) => {
   try {
     const redisClient = req.app.get('redisClient');
 
     if (!redisClient || !redisClient.isReady) {
-      return res.status(503).json({ success: false, error: 'Redis chưa kết nối. Bảng xếp hạng chưa khả dụng.' });
+      return res.status(503).json({ success: false, error: 'Redis is not connected. The leaderboard is not available yet.' });
     }
 
     const topPlayers = await redisClient.zRangeWithScores('global_leaderboard', 0, 49, { REV: true });
 
-    // Đổi tên key để API response dễ đọc hơn
+    // Rename keys to make the API response easier to read
     const leaderboard = topPlayers.map((entry, index) => ({
       rank: index + 1,
       userId: entry.value,
@@ -26,14 +26,14 @@ router.get('/', async (req, res) => {
 
     res.json({ success: true, leaderboard });
   } catch (error) {
-    console.error('[Leaderboard] Lỗi:', error.message);
-    res.status(500).json({ success: false, error: 'Không thể tải bảng xếp hạng.' });
+    console.error('[Leaderboard] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Could not load the leaderboard.' });
   }
 });
 
 // ================================================================
-// GET /api/leaderboard/me  (Yêu cầu JWT)
-// Lấy thứ hạng cá nhân của người chơi hiện tại
+// GET /api/leaderboard/me  (Requires JWT)
+// Fetches the current player's personal rank
 // ================================================================
 router.get('/me', authenticateToken, async (req, res) => {
   try {
@@ -41,20 +41,20 @@ router.get('/me', authenticateToken, async (req, res) => {
     const { userId } = req.user;
 
     if (!redisClient || !redisClient.isReady) {
-      return res.status(503).json({ success: false, error: 'Redis chưa kết nối.' });
+      return res.status(503).json({ success: false, error: 'Redis is not connected.' });
     }
 
     const rank = await redisClient.zRevRank('global_leaderboard', userId);
     const score = await redisClient.zScore('global_leaderboard', userId);
 
     if (rank === null) {
-      return res.json({ success: true, rank: null, score: 0, message: 'Chưa có điểm số trên bảng xếp hạng.' });
+      return res.json({ success: true, rank: null, score: 0, message: 'No score on the leaderboard yet.' });
     }
 
     res.json({ success: true, rank: rank + 1, score: Math.round(Number(score)) });
   } catch (error) {
-    console.error('[Leaderboard/Me] Lỗi:', error.message);
-    res.status(500).json({ success: false, error: 'Lỗi máy chủ.' });
+    console.error('[Leaderboard/Me] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Server error.' });
   }
 });
 

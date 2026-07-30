@@ -1,32 +1,37 @@
 <template>
   <div class="gacha-container">
     <div class="gacha-header">
-      <h2>🎁 Cửa Hàng Thẻ Cầu Thủ</h2>
-      <p class="subtitle">Thử vận may với gói Premium Pack</p>
-      <div class="pack-price-badge">💰 $2.5M / Lượt</div>
+      <h2>🎁 Player Card Shop</h2>
+      <p class="subtitle">Try your luck with a Premium Pack</p>
+      <div class="pack-price-badge">💰 $2.5M / Pull</div>
     </div>
 
-    <!-- KHU VỰC THẺ 3D -->
+    <!-- 3D CARD ZONE -->
     <div :class="['card-scene', { disabled: isLoading || isResetting }]" @click="openPack">
-      <div :class="['card-container', { 'is-flipped': isFlipped }]">
+      <div :class="['card-container', { 'is-flipped': isFlipped, 'is-shaking': isShaking }]">
 
-        <!-- MẶT TRƯỚC: VỎ GÓI THẺ CHƯA MỞ -->
+        <!-- FRONT: UNOPENED PACK COVER -->
         <div class="card-face card-front">
           <div class="pack-design">
             <div class="pack-glow"></div>
             <h3>PREMIUM PACK</h3>
-            <p class="click-hint">{{ isLoading ? 'Đang mở gói...' : isResetting ? 'Đang reset...' : 'Click để mở' }}</p>
+            <p class="click-hint">{{ isLoading ? 'Opening pack...' : isResetting ? 'Resetting...' : 'Click to open' }}</p>
           </div>
         </div>
 
-        <!-- MẶT SAU: KẾT QUẢ CẦU THỦ -->
+        <!-- BACK: PLAYER RESULT -->
         <div
-          class="card-face card-back"
+          :class="['card-face', 'card-back', pulseClass]"
           :style="pulledPlayer ? {
             borderColor: pulledPlayer.rarity.color,
-            boxShadow: `0 0 40px ${pulledPlayer.rarity.color}88`
+            '--glow-color': pulledPlayer.rarity.color
           } : {}"
         >
+          <!-- RARITY-BASED PARTICLE BURST -->
+          <div class="particle-burst" v-if="particles.length">
+            <span v-for="p in particles" :key="p.id" class="particle" :style="p.style"></span>
+          </div>
+
           <div v-if="pulledPlayer" class="player-reveal">
             <div class="rarity-banner" :style="{ background: pulledPlayer.rarity.color }">
               {{ rarityLabel[pulledPlayer.rarity.tier] }}
@@ -35,7 +40,7 @@
             <h2 class="player-name">{{ pulledPlayer.name }}</h2>
             <div class="player-stats">
               <div class="stat-item">
-                <span class="stat-label">Giá trị</span>
+                <span class="stat-label">Value</span>
                 <span class="stat-val">${{ pulledPlayer.price }}M</span>
               </div>
               <div class="stat-item">
@@ -55,8 +60,8 @@
               >{{ result }}</span>
             </div>
             <div class="action-buttons">
-              <button class="btn-claim" @click.stop="claimPlayer">⚽ Thu Thập</button>
-              <button class="btn-retry" @click.stop="resetCard">🔄 Quay lại</button>
+              <button class="btn-claim" @click.stop="claimPlayer">⚽ Claim</button>
+              <button class="btn-retry" @click.stop="resetCard">🔄 Go Back</button>
             </div>
           </div>
           <div v-else class="loading-spinner">
@@ -67,9 +72,9 @@
       </div>
     </div>
 
-    <!-- XÁC SUẤT HIỂN THỊ -->
+    <!-- DISPLAYED ODDS -->
     <div class="odds-table">
-      <h4>📊 Tỷ lệ rơi</h4>
+      <h4>📊 Drop Rates</h4>
       <div class="odds-row" v-for="tier in rarityTiers" :key="tier.name">
         <span class="tier-dot" :style="{ background: tier.color }"></span>
         <span class="tier-name">{{ tier.name }}</span>
@@ -80,16 +85,19 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { globalStore } from '../store';
+import { ref, computed } from 'vue';
+import { globalStore, API_BASE } from '../store';
 
 const store = globalStore;
 
 const isFlipped  = ref(false);
 const isLoading  = ref(false);
 const isResetting = ref(false);
+const isShaking   = ref(false);
 const pulledPlayer = ref(null);
 const activeRequestId = ref(0);
+const particles = ref([]);
+let particleClearTimer = null;
 
 const PACK_COST = 2.5;
 const REQUEST_TIMEOUT_MS = 8000;
@@ -108,11 +116,66 @@ const rarityTiers = [
   { name: 'COMMON (< $6M)',     color: '#bdc3c7', pct: '~50%' },
 ];
 
+// Reveal-effect intensity scales with rarity — COMMON is nearly silent,
+// LEGENDARY shakes + bursts a large number of particles. Kept as hand-rolled
+// CSS, no animation library added.
+const PARTICLE_COUNT_BY_TIER = { LEGENDARY: 28, EPIC: 16, RARE: 8, COMMON: 0 };
+const PULSE_CLASS_BY_TIER = {
+  LEGENDARY: 'glow-pulse-legendary',
+  EPIC: 'glow-pulse-epic',
+  RARE: 'glow-pulse-rare',
+  COMMON: '',
+};
+
+const pulseClass = computed(() => {
+  if (!pulledPlayer.value) return '';
+  return PULSE_CLASS_BY_TIER[pulledPlayer.value.rarity.tier] || '';
+});
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function triggerRevealEffects(tier, color) {
+  if (prefersReducedMotion()) return;
+
+  if (tier === 'LEGENDARY') {
+    isShaking.value = true;
+    setTimeout(() => { isShaking.value = false; }, 450);
+  }
+
+  const count = PARTICLE_COUNT_BY_TIER[tier] ?? 0;
+  if (count === 0) return;
+
+  particles.value = Array.from({ length: count }, (_, i) => {
+    const angle = (360 / count) * i + (Math.random() * 20 - 10);
+    const distance = 90 + Math.random() * 70;
+    const size = 5 + Math.random() * 5;
+    return {
+      id: `p-${Date.now()}-${i}`,
+      style: {
+        '--angle': `${angle}deg`,
+        '--distance': `${distance}px`,
+        width: `${size}px`,
+        height: `${size}px`,
+        background: color,
+        boxShadow: `0 0 ${size}px ${color}`,
+        animationDelay: `${(Math.random() * 0.15).toFixed(2)}s`,
+      },
+    };
+  });
+
+  clearTimeout(particleClearTimer);
+  particleClearTimer = setTimeout(() => { particles.value = []; }, 1300);
+}
+
 const openPack = async () => {
   if (isFlipped.value || isLoading.value || isResetting.value) return;
 
   if (store.budget < PACK_COST) {
-    store.addToast('Bạn không đủ tiền mua thẻ!', 'error');
+    store.addToast('You don\'t have enough money for a pack!', 'error');
     return;
   }
 
@@ -122,7 +185,7 @@ const openPack = async () => {
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const res = await fetch('http://localhost:3000/api/gacha/open', {
+    const res = await fetch(`${API_BASE}/gacha/open`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -133,13 +196,20 @@ const openPack = async () => {
     if (!res.ok) throw new Error('Server error');
     const data = await res.json();
 
-    // Trừ tiền chỉ khi API thành công
+    // Only deduct money once the API succeeds
     store.budget = Math.round((store.budget - PACK_COST) * 10) / 10;
 
     pulledPlayer.value = data.player;
     isFlipped.value    = true;
 
-    // Âm thanh theo độ hiếm
+    // Reveal effects (shake + particle burst) only start after the card
+    // finishes flipping (matches the .card-container's 0.85s transition
+    // duration).
+    setTimeout(() => {
+      triggerRevealEffects(data.player.rarity.tier, data.player.rarity.color);
+    }, 850);
+
+    // Sound based on rarity
     try {
       const tier = data.player.rarity.tier;
       if (tier === 'LEGENDARY' || tier === 'EPIC') {
@@ -147,14 +217,14 @@ const openPack = async () => {
       } else {
         new Audio('https://actions.google.com/sounds/v1/foley/paper_flap.ogg').play();
       }
-    } catch (_) { /* Bỏ qua nếu browser chặn autoplay */ }
+    } catch (_) { /* Ignore if the browser blocks autoplay */ }
 
   } catch (error) {
     if (requestId !== activeRequestId.value) return;
     if (error?.name === 'AbortError') {
-      store.addToast('Mở thẻ quá lâu, vui lòng thử lại.', 'error');
+      store.addToast('Opening the pack took too long, please try again.', 'error');
     } else {
-      store.addToast('Lỗi máy chủ, không thể mở thẻ!', 'error');
+      store.addToast('Server error, could not open the pack!', 'error');
     }
   } finally {
     clearTimeout(timeoutId);
@@ -167,10 +237,10 @@ const claimPlayer = () => {
 
   const added = store.addPlayerToSquad({ ...pulledPlayer.value });
   if (added) {
-    store.addToast(`✅ Đã thêm ${pulledPlayer.value.name} vào đội hình!`, 'success');
+    store.addToast(`✅ Added ${pulledPlayer.value.name} to your squad!`, 'success');
     resetCard();
   }
-  // Nếu false, store.addPlayerToSquad đã tự toast lỗi rồi
+  // If false, store.addPlayerToSquad already showed its own error toast
 };
 
 const resetCard = () => {
@@ -178,7 +248,10 @@ const resetCard = () => {
   isLoading.value = false;
   isResetting.value = true;
   isFlipped.value = false;
+  isShaking.value = false;
   pulledPlayer.value = null;
+  clearTimeout(particleClearTimer);
+  particles.value = [];
   setTimeout(() => { isResetting.value = false; }, 700);
 };
 </script>
@@ -208,7 +281,7 @@ const resetCard = () => {
   letter-spacing: 0.5px;
 }
 
-/* ===== CARD 3D ===== */
+/* ===== 3D CARD ===== */
 .card-scene {
   width: 300px;
   height: 450px;
@@ -242,7 +315,7 @@ const resetCard = () => {
   overflow: hidden;
 }
 
-/* MẶTTRƯỚC */
+/* FRONT FACE */
 .card-front {
   background: radial-gradient(ellipse at top, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
   color: #fff;
@@ -282,7 +355,7 @@ const resetCard = () => {
 }
 .click-hint { font-size: 13px; color: #a4b0be; margin: 0; }
 
-/* MẶT SAU */
+/* BACK FACE */
 .card-back {
   background: #1e272e;
   transform: rotateY(180deg);
@@ -402,7 +475,7 @@ const resetCard = () => {
   animation: spin 0.8s linear infinite;
 }
 
-/* BẢNG XÁC SUẤT */
+/* ODDS TABLE */
 .odds-table {
   background: #1e272e;
   border: 1px solid #2f3640;
@@ -422,6 +495,58 @@ const resetCard = () => {
 .tier-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 .tier-name { color: #d1d8e0; font-size: 13px; flex: 1; }
 .tier-pct  { color: #f1c40f; font-weight: 700; font-size: 14px; }
+
+/* ===== RARITY-BASED REVEAL EFFECTS ===== */
+
+/* Slight shake on a LEGENDARY pull — preserves the flipped state (rotateY
+   180deg) while shaking by adding translateX to the same keyframe. */
+@keyframes card-shake {
+  0%, 100% { transform: rotateY(180deg) translateX(0); }
+  20%      { transform: rotateY(180deg) translateX(-10px); }
+  40%      { transform: rotateY(180deg) translateX(8px); }
+  60%      { transform: rotateY(180deg) translateX(-6px); }
+  80%      { transform: rotateY(180deg) translateX(4px); }
+}
+.card-container.is-shaking { animation: card-shake 0.45s ease-in-out; }
+
+/* Pulsing glow border, intensity/speed scaled by rarity */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 22px var(--glow-color, transparent); }
+  50%      { box-shadow: 0 0 60px var(--glow-color, transparent); }
+}
+.card-back.glow-pulse-legendary { animation: glow-pulse 1.1s ease-in-out infinite; }
+.card-back.glow-pulse-epic      { animation: glow-pulse 1.6s ease-in-out infinite; }
+.card-back.glow-pulse-rare      { animation: glow-pulse 2.2s ease-in-out infinite; }
+
+/* Particles bursting out from the card's center once flipped */
+.particle-burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 5;
+}
+.particle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  opacity: 0;
+  animation: particle-fly 0.9s ease-out forwards;
+}
+@keyframes particle-fly {
+  0%   { opacity: 1; transform: translate(-50%, -50%) rotate(var(--angle)) translateX(0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--angle)) translateX(var(--distance)) scale(0.3); }
+}
+
+/* Respect prefers-reduced-motion: keep the final state, drop the motion */
+@media (prefers-reduced-motion: reduce) {
+  .card-container.is-shaking { animation: none; }
+  .card-back.glow-pulse-legendary,
+  .card-back.glow-pulse-epic,
+  .card-back.glow-pulse-rare { animation: none; box-shadow: 0 0 30px var(--glow-color, transparent); }
+  .particle-burst { display: none; }
+}
 
 /* KEYFRAMES */
 @keyframes bounce {

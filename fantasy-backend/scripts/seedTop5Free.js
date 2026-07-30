@@ -29,7 +29,14 @@ const prisma = new PrismaClient();
 const API_KEY = process.env.API_FOOTBALL_KEY;
 const BASE_URL = 'https://v3.football.api-sports.io';
 const SEASON = 2024; // most recent season available on the free tier
-const REQUEST_DELAY_MS = 800;
+// API-Football's free tier is limited to ~10 requests/minute (DIFFERENT
+// from the 100 requests/DAY limit). 800ms is too fast (~75 req/min) and
+// gets hit with a 429 almost immediately — not because the daily quota is
+// exhausted, as an earlier version of this log incorrectly assumed.
+// 6.5s/request stays within the per-minute limit with a safety margin.
+const REQUEST_DELAY_MS = 6500;
+const RATE_LIMIT_RETRY_MS = 65000; // wait out one full minute cycle, then retry
+const MAX_RATE_LIMIT_RETRIES = 3;
 const PROGRESS_FILE = path.join(__dirname, '.seedTop5Progress.json');
 
 const LEAGUES = [
@@ -73,6 +80,41 @@ async function fetchPlayersPage(leagueId, page) {
   return response.data;
 }
 
+// Normalizes API-Football's raw stats (per-season totals) into per-90-minute
+// stats, then compresses them onto a 0-1 scale (the radar chart multiplies
+// by 100 to get a %). The API-Football free tier does NOT have real xG/xA
+// (that's paid data like Opta/StatsBomb), so the "xG"/"xA" here are only
+// proxies derived from actual goals/assists — not true Expected Goals. The
+// normalization ceilings (6 shots/90, 4 key passes/90...) were chosen at a
+// "very high" level for a typical attacking player, to avoid every player
+// being pushed to 100%.
+function buildStatsFromApiFootball(stats) {
+  const minutes = Number(stats?.games?.minutes) || 0;
+  if (minutes <= 0) return null; // Not enough data for a reliable per-90 estimate
+
+  const per90 = (total) => (Number(total) || 0) / minutes * 90;
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+  const shots = clamp01(per90(stats?.shots?.total) / 6);
+  const keyPasses = clamp01(per90(stats?.passes?.key) / 4);
+  const xA = clamp01(per90(stats?.goals?.assists) / 0.6); // proxy: real assists/90
+  const xG = clamp01(per90(stats?.goals?.total) / 0.8);   // proxy: real goals/90
+  const form = clamp01((Number(stats?.games?.rating) || 6.0) / 10);
+
+  const out = { shots, keyPasses, xA, xG, form };
+
+  // Real defensive stats (tackles + interceptions per-90) — used to replace
+  // the xG-derived formula for the defender's "Defending" axis (more accurate).
+  const defensiveActions = (Number(stats?.tackles?.total) || 0) + (Number(stats?.tackles?.interceptions) || 0);
+  if (defensiveActions > 0) out.defensiveActions = clamp01(per90(defensiveActions) / 8);
+
+  // Real goalkeeper save count — replaces the xG-derived formula for the
+  // "Saves" axis.
+  if (stats?.goals?.saves != null) out.saves = clamp01(per90(stats.goals.saves) / 5);
+
+  return out;
+}
+
 async function upsertPlayersFromPage(players, leagueId) {
   let count = 0;
   for (const entry of players) {
@@ -86,7 +128,13 @@ async function upsertPlayersFromPage(players, leagueId) {
       position,
       currentPrice: randPrice(),
       teamId: stats.team.id,
-      form: ['D', 'D', 'D']
+      form: ['D', 'D', 'D'],
+      stats: buildStatsFromApiFootball(stats),
+      // API-Football already returns a photo URL for every player at no
+      // extra request cost — just need to save the field that was
+      // previously being ignored.
+      photoUrl: entry.player?.photo || null,
+      teamName: stats.team?.name || null,
     };
     await prisma.player.upsert({ where: { id: record.id }, update: record, create: record });
     count += 1;
@@ -95,18 +143,18 @@ async function upsertPlayersFromPage(players, leagueId) {
 }
 
 async function assertDatabaseReady() {
-  if (!process.env.DATABASE_URL) throw new Error('Thiếu DATABASE_URL trong .env');
+  if (!process.env.DATABASE_URL) throw new Error('Missing DATABASE_URL in .env');
   await prisma.$queryRaw`SELECT 1`;
 }
 
 async function run() {
   if (!API_KEY) {
-    throw new Error('Thiếu API_FOOTBALL_KEY trong .env. Đăng ký miễn phí tại https://dashboard.api-football.com/register');
+    throw new Error('Missing API_FOOTBALL_KEY in .env. Register for free at https://dashboard.api-football.com/register');
   }
 
-  console.log('🔍 Kiểm tra kết nối PostgreSQL...');
+  console.log('🔍 Checking PostgreSQL connection...');
   await assertDatabaseReady();
-  console.log('✅ PostgreSQL sẵn sàng.\n');
+  console.log('✅ PostgreSQL ready.\n');
 
   const progress = loadProgress();
   let totalUpserted = 0;
@@ -115,22 +163,35 @@ async function run() {
   for (const league of LEAGUES) {
     const state = progress[league.id];
     if (state.done) {
-      console.log(`⏭️  ${league.name}: đã hoàn tất trước đó, bỏ qua.`);
+      console.log(`⏭️  ${league.name}: already completed previously, skipping.`);
       continue;
     }
 
-    console.log(`\n📦 Giải đấu: ${league.name} (tiếp tục từ trang ${state.lastCompletedPage + 1})`);
+    console.log(`\n📦 League: ${league.name} (resuming from page ${state.lastCompletedPage + 1})`);
 
     let page = state.lastCompletedPage + 1;
     while (true) {
       let payload;
-      try {
-        payload = await fetchPlayersPage(league.id, page);
-      } catch (error) {
-        console.log(`   ❌ Lỗi mạng ở trang ${page}: ${error.message}. Dừng lại, tiến trình đã lưu.`);
-        quotaExhausted = true;
-        break;
+      let rateLimitRetries = 0;
+      while (true) {
+        try {
+          payload = await fetchPlayersPage(league.id, page);
+          break;
+        } catch (error) {
+          const status = error?.response?.status;
+          if (status === 429 && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+            rateLimitRetries += 1;
+            console.log(`   ⏳ Hit the 10 requests/minute limit (429) on page ${page}. Waiting ${RATE_LIMIT_RETRY_MS / 1000}s then retrying (${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})...`);
+            await sleep(RATE_LIMIT_RETRY_MS);
+            continue;
+          }
+          console.log(`   ❌ Network error on page ${page}: ${error.message}. Stopping, progress has been saved.`);
+          quotaExhausted = true;
+          payload = null;
+          break;
+        }
       }
+      if (!payload) break;
 
       const hasErrors = payload.errors && (Array.isArray(payload.errors) ? payload.errors.length > 0 : Object.keys(payload.errors).length > 0);
       if (hasErrors && payload.results === 0) {
@@ -140,13 +201,13 @@ async function run() {
         if (isPageCeiling) {
           // Free plan hard-caps at page 3 (60 players) per league, permanently
           // — not a daily quota issue, retrying tomorrow won't help.
-          console.log(`   🧱 Free plan giới hạn cứng ở trang 3 cho giải này (${errorText}). Coi như đã xong.`);
+          console.log(`   🧱 Free plan hard cap hit at page 3 for this league (${errorText}). Treating it as done.`);
           state.done = true;
           state.totalPages = state.lastCompletedPage;
           saveProgress(progress);
         } else {
-          console.log(`   🛑 API dừng ở trang ${page}: ${errorText}`);
-          console.log('   → Rất có thể đã hết quota 100 request/ngày. Chạy lại script này vào ngày mai để tiếp tục.');
+          console.log(`   🛑 API stopped on page ${page}: ${errorText}`);
+          console.log('   → Most likely the 100 requests/day quota is exhausted. Re-run this script tomorrow to continue.');
           quotaExhausted = true;
         }
         break;
@@ -161,12 +222,12 @@ async function run() {
       state.lastCompletedPage = page;
       saveProgress(progress);
 
-      console.log(`   ✓ Trang ${page}/${totalPages} — ${upserted} cầu thủ (tổng phiên này: ${totalUpserted})`);
+      console.log(`   ✓ Page ${page}/${totalPages} — ${upserted} players (session total: ${totalUpserted})`);
 
       if (page >= totalPages) {
         state.done = true;
         saveProgress(progress);
-        console.log(`   🎉 ${league.name} hoàn tất!`);
+        console.log(`   🎉 ${league.name} complete!`);
         break;
       }
 
@@ -178,17 +239,17 @@ async function run() {
   }
 
   const allDone = LEAGUES.every((l) => progress[l.id].done);
-  console.log(`\n💾 Đã nạp ${totalUpserted} cầu thủ trong phiên này.`);
+  console.log(`\n💾 Loaded ${totalUpserted} players in this session.`);
   if (allDone) {
-    console.log('✅ TẤT CẢ 5 giải đấu đã hoàn tất! Có thể xoá scripts/.seedTop5Progress.json nếu muốn.');
+    console.log('✅ ALL 5 leagues are complete! You can delete scripts/.seedTop5Progress.json if you want.');
   } else if (quotaExhausted) {
-    console.log('⏸️  Chưa xong hết — chạy lại "npm run seed:top5-free" vào ngày mai (quota reset theo UTC) để tiếp tục.');
+    console.log('⏸️  Not finished yet — re-run "npm run seed:top5-free" tomorrow (quota resets by UTC) to continue.');
   }
 }
 
 run()
   .catch((err) => {
-    console.error('❌ Seed thất bại:', err?.response?.data || err.message);
+    console.error('❌ Seed failed:', err?.response?.data || err.message);
     process.exitCode = 1;
   })
   .finally(async () => {

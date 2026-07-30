@@ -22,16 +22,16 @@ const TEAMS = [
 ];
 
 async function seedTeams() {
-  console.log('⏳ Đang nạp dữ liệu 10 CLB curated (Team) vào PostgreSQL...');
+  console.log('⏳ Loading data for 10 curated clubs (Team) into PostgreSQL...');
   for (const team of TEAMS) {
     await prisma.team.upsert({ where: { id: team.id }, update: team, create: team });
   }
-  console.log(`✅ Đã nạp xong ${TEAMS.length} CLB.`);
+  console.log(`✅ Finished loading ${TEAMS.length} clubs.`);
 }
 
 seedTeams()
   .catch((err) => {
-    console.error('❌ Seed Team thất bại:', err.message);
+    console.error('❌ Seed Team failed:', err.message);
     process.exitCode = 1;
   })
   .finally(async () => {

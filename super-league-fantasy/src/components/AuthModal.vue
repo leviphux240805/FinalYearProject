@@ -5,7 +5,7 @@
       <div class="modal-header">
         <div class="modal-logo">🏆</div>
         <h1>SUPER LEAGUE PRO</h1>
-        <p class="modal-subtitle">Hệ thống Fantasy Enterprise - Mùa giải 2026</p>
+        <p class="modal-subtitle">Enterprise Fantasy System - 2026 Season</p>
       </div>
 
       <!-- Tab Switch -->
@@ -13,11 +13,11 @@
         <button
           :class="['tab-btn', { active: activeTab === 'login' }]"
           @click="switchTab('login')"
-        >Đăng Nhập</button>
+        >Log In</button>
         <button
           :class="['tab-btn', { active: activeTab === 'register' }]"
           @click="switchTab('register')"
-        >Đăng Ký</button>
+        >Sign Up</button>
       </div>
 
       <!-- Form -->
@@ -29,26 +29,26 @@
 
         <!-- Username -->
         <div class="field-group">
-          <label>Tên đăng nhập</label>
+          <label>Username</label>
           <input
             v-model="form.username"
             type="text"
-            placeholder="Ví dụ: supercoach99"
+            placeholder="e.g. supercoach99"
             autocomplete="username"
             :disabled="isLoading"
             required
           />
-          <span v-if="activeTab === 'register'" class="field-hint">3–30 ký tự, chỉ gồm chữ, số và dấu _</span>
+          <span v-if="activeTab === 'register'" class="field-hint">3–30 characters, letters, numbers and _ only</span>
         </div>
 
         <!-- Password -->
         <div class="field-group">
-          <label>Mật khẩu</label>
+          <label>Password</label>
           <div class="password-wrapper">
             <input
               v-model="form.password"
               :type="showPassword ? 'text' : 'password'"
-              placeholder="Tối thiểu 8 ký tự"
+              placeholder="At least 8 characters"
               autocomplete="current-password"
               :disabled="isLoading"
               required
@@ -61,32 +61,50 @@
 
         <!-- Confirm Password (Register only) -->
         <div v-if="activeTab === 'register'" class="field-group">
-          <label>Xác nhận mật khẩu</label>
+          <label>Confirm Password</label>
           <input
             v-model="form.confirmPassword"
             type="password"
-            placeholder="Nhập lại mật khẩu"
+            placeholder="Re-enter your password"
             autocomplete="new-password"
             :disabled="isLoading"
             required
           />
           <span v-if="form.confirmPassword && form.password !== form.confirmPassword" class="field-error">
-            Mật khẩu không khớp!
+            Passwords don't match!
           </span>
         </div>
 
         <!-- Submit Button -->
         <button type="submit" class="submit-btn" :disabled="isLoading || isFormInvalid">
           <span v-if="isLoading" class="spinner"></span>
-          <span v-else>{{ activeTab === 'login' ? 'Vào Sân' : '⚽ Tạo Tài Khoản' }}</span>
+          <span v-else>{{ activeTab === 'login' ? 'Enter the Pitch' : '⚽ Create Account' }}</span>
         </button>
       </form>
 
+      <!-- Social Login -->
+      <div class="divider"><span>or continue with</span></div>
+      <div class="social-buttons">
+        <a class="social-btn social-google" :href="`${API_BASE}/auth/google`" title="Continue with Google">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.28-1.7 3.76-5.5 3.76-3.31 0-6.02-2.74-6.02-6.12s2.7-6.12 6.02-6.12c1.89 0 3.16.8 3.88 1.5l2.64-2.55C16.94 2.98 14.7 2 12 2 6.98 2 2.9 6.06 2.9 11s4.08 9 9.1 9c5.25 0 8.73-3.69 8.73-8.89 0-.6-.07-1.05-.15-1.5H12z"/></svg>
+          <span>Google</span>
+        </a>
+        <a class="social-btn social-facebook" :href="`${API_BASE}/auth/facebook`" title="Continue with Facebook">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="#1877F2" d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.91h2.54V9.85c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.78-1.63 1.57v1.88h2.78l-.44 2.91h-2.34V22c4.78-.76 8.44-4.92 8.44-9.94z"/></svg>
+          <span>Facebook</span>
+        </a>
+        <a class="social-btn social-x" :href="`${API_BASE}/auth/twitter`" title="Continue with X">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M13.6 10.6 20.4 3h-1.6l-5.9 6.6L8.2 3H2.6l7.1 10.2L2.6 21h1.6l6.2-7 5 7h5.6l-7.4-10.4Zm-2.2 2.5-.7-1L4.9 4.1h2.4l4.6 6.5.7 1 6 8.4h-2.4l-4.8-6.9Z"/></svg>
+          <span>X</span>
+        </a>
+      </div>
+      <p class="social-note">You'll be redirected to sign in, then brought back here.</p>
+
       <!-- Footer -->
       <p class="auth-footer">
-        {{ activeTab === 'login' ? 'Chưa có tài khoản?' : 'Đã có tài khoản?' }}
+        {{ activeTab === 'login' ? "Don't have an account?" : 'Already have an account?' }}
         <a href="#" @click.prevent="switchTab(activeTab === 'login' ? 'register' : 'login')">
-          {{ activeTab === 'login' ? 'Đăng ký ngay' : 'Đăng nhập' }}
+          {{ activeTab === 'login' ? 'Sign up now' : 'Log in' }}
         </a>
       </p>
     </div>
@@ -95,7 +113,7 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import { globalStore } from '../store';
+import { globalStore, API_BASE } from '../store';
 
 const activeTab    = ref('login');
 const isLoading    = ref(false);
@@ -133,7 +151,7 @@ async function handleSubmit() {
       await globalStore.register(form.value.username, form.value.password);
     }
   } catch (err) {
-    errorMsg.value = err.message || 'Đã xảy ra lỗi. Vui lòng thử lại.';
+    errorMsg.value = err.message || 'Something went wrong. Please try again.';
   } finally {
     isLoading.value = false;
   }
@@ -335,6 +353,56 @@ async function handleSubmit() {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Social Login */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 14px;
+  color: #4a5568;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #2f3f55;
+}
+.social-buttons {
+  display: flex;
+  gap: 10px;
+}
+.social-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px;
+  background: #111827;
+  border: 1px solid #2f3f55;
+  border-radius: 8px;
+  color: #e0e6ed;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+.social-btn:hover {
+  border-color: #0fb9b1;
+  background: #16202f;
+  transform: translateY(-1px);
+}
+.social-note {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 11px;
+  color: #4a5568;
 }
 
 /* Footer */

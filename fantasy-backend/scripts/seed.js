@@ -18,7 +18,7 @@ const TOP5_LEAGUE_IDS = String(process.env.SPORTMONKS_TOP5_LEAGUE_IDS || '8,564,
 const DATABASE_URL = process.env.DATABASE_URL || '';
 
 const POSITION_ID_MAP = {
-  // Lưu ý: mapping này có thể thay đổi theo dataset Sportmonks, ưu tiên map theo tên trước
+  // Note: this mapping may vary depending on the Sportmonks dataset; mapping by name is preferred first
   24: 'FWD',
   25: 'MID',
   26: 'DEF',
@@ -53,15 +53,16 @@ const toFantasyPosition = (player) => {
 };
 
 const hasTop5LeagueSignal = (player) => {
-  // Ưu tiên từ latest fixture league
+  // Prefer the latest fixture league
   const latestLeagues = (player?.latest || [])
     .map(item => item?.fixture?.league?.id)
     .filter(Number.isFinite);
 
   if (latestLeagues.some(id => TOP5_LEAGUE_IDS.includes(id))) return true;
 
-  // Nếu không có latest, cho qua để tránh loại nhầm cầu thủ do thiếu include
-  // Có thể tighten sau khi chuẩn hóa include/team-season ở production
+  // If there's no "latest" data, let it through to avoid wrongly excluding a
+  // player due to a missing include. Can be tightened later once the
+  // include/team-season data is standardized in production.
   return latestLeagues.length === 0;
 };
 
@@ -107,11 +108,11 @@ async function fetchPlayersPage(page) {
 
 async function assertDatabaseReady() {
   if (!DATABASE_URL) {
-    throw new Error('Thiếu DATABASE_URL trong .env');
+    throw new Error('Missing DATABASE_URL in .env');
   }
 
   if (DATABASE_URL.includes('yourpassword')) {
-    throw new Error('DATABASE_URL vẫn đang dùng placeholder "yourpassword". Hãy cập nhật user/password thật trước khi seed.');
+    throw new Error('DATABASE_URL is still using the "yourpassword" placeholder. Please update it with a real user/password before seeding.');
   }
 
   try {
@@ -119,22 +120,22 @@ async function assertDatabaseReady() {
   } catch (error) {
     const message = error?.message || 'Unknown DB error';
     throw new Error(
-      `Không kết nối được PostgreSQL. Đảm bảo DB đang chạy và DATABASE_URL hợp lệ. Chi tiết: ${message}`
+      `Could not connect to PostgreSQL. Make sure the DB is running and DATABASE_URL is valid. Details: ${message}`
     );
   }
 }
 
 async function seedDatabase() {
   if (!API_TOKEN) {
-    throw new Error('Thiếu SPORTMONKS_API_TOKEN trong .env');
+    throw new Error('Missing SPORTMONKS_API_TOKEN in .env');
   }
 
-  console.log('🔍 Kiểm tra kết nối PostgreSQL...');
+  console.log('🔍 Checking PostgreSQL connection...');
   await assertDatabaseReady();
-  console.log('✅ PostgreSQL sẵn sàng.');
+  console.log('✅ PostgreSQL ready.');
 
-  console.log('⏳ Đang hút dữ liệu từ Sportmonks Top 5 Leagues...');
-  console.log(`📦 Cấu hình: perPage=${PER_PAGE}, maxPages=${MAX_PAGES}, target=${TARGET_COUNT}`);
+  console.log('⏳ Pulling data from Sportmonks Top 5 Leagues...');
+  console.log(`📦 Config: perPage=${PER_PAGE}, maxPages=${MAX_PAGES}, target=${TARGET_COUNT}`);
 
   const uniquePlayers = new Map();
   let page = 1;
@@ -162,11 +163,11 @@ async function seedDatabase() {
       payload?.links?.next
     );
 
-    process.stdout.write(`\r🔄 Page ${page} | đã gom ${uniquePlayers.size} cầu thủ...`);
+    process.stdout.write(`\r🔄 Page ${page} | collected ${uniquePlayers.size} players...`);
     page += 1;
   }
 
-  console.log('\n💾 Bắt đầu bơm vào PostgreSQL...');
+  console.log('\n💾 Starting to load into PostgreSQL...');
 
   const records = Array.from(uniquePlayers.values());
   let inserted = 0;
@@ -179,12 +180,12 @@ async function seedDatabase() {
     inserted += result.count;
   }
 
-  console.log(`✅ Seed hoàn tất. Thu thập: ${records.length} | Insert mới: ${inserted}`);
+  console.log(`✅ Seed complete. Collected: ${records.length} | Newly inserted: ${inserted}`);
 }
 
 seedDatabase()
   .catch((err) => {
-    console.error('❌ Seed thất bại:', err?.response?.data || err.message);
+    console.error('❌ Seed failed:', err?.response?.data || err.message);
     process.exitCode = 1;
   })
   .finally(async () => {

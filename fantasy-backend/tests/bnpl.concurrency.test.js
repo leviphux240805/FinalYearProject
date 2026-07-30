@@ -90,7 +90,7 @@ describe('BNPL concurrency (Algorithm 1 row locking)', () => {
 
     expect(succeeded.length).toBe(1);
     expect(failed.length).toBe(1);
-    expect(failed[0].reason.message).toMatch(/Số dư không đủ/);
+    expect(failed[0].reason.message).toMatch(/Insufficient balance/);
     expect(Number(final.virtualBalance)).toBe(1.0);
     expect(Number(final.virtualBalance)).toBeGreaterThanOrEqual(0);
   });

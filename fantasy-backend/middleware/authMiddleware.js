@@ -1,18 +1,18 @@
 const jwt = require('jsonwebtoken');
 
 /**
- * Middleware xác thực JWT Token.
- * Kiểm tra header Authorization: Bearer <token>
- * Nếu hợp lệ, gắn req.user = { userId, username } rồi chuyển sang handler tiếp theo.
+ * JWT token authentication middleware.
+ * Checks the Authorization: Bearer <token> header.
+ * If valid, attaches req.user = { userId, username } and passes control to the next handler.
  */
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN" -> lấy TOKEN
+  const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN" -> extract TOKEN
 
   if (!token) {
     return res.status(401).json({
       success: false,
-      error: 'Truy cập bị từ chối. Vui lòng đăng nhập để tiếp tục.'
+      error: 'Access denied. Please log in to continue.'
     });
   }
 
@@ -24,12 +24,12 @@ const authenticateToken = (req, res, next) => {
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,
-        error: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.'
+        error: 'Your session has expired. Please log in again.'
       });
     }
     return res.status(403).json({
       success: false,
-      error: 'Token không hợp lệ. Vui lòng đăng nhập lại.'
+      error: 'Invalid token. Please log in again.'
     });
   }
 };

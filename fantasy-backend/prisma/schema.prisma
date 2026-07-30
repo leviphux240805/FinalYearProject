@@ -10,9 +10,29 @@ generator client {
 model User {
   id             String        @id @default(uuid())
   username       String        @unique
-  passwordHash   String
-  virtualBalance Decimal       @default(10.0) @db.Decimal(5, 1)
+  // Nullable: an OAuth-only account (Google/Facebook/X) never has a local
+  // password. routes/auth.js's /login rejects these with the same generic
+  // "incorrect username or password" message rather than crashing
+  // bcrypt.compare on a null hash — see the passwordHash guard there.
+  passwordHash   String?
+  virtualBalance Decimal       @default(100.0) @db.Decimal(5, 1)
   penaltyPoints  Int           @default(0)
+  // Refresh-token rotation: only the SHA-256 hash of the token's `jti` is
+  // stored, never the raw token. A mismatch (or expiry) rejects /refresh —
+  // this is what makes token rotation actually revoke the previous token
+  // rather than just being cosmetic.
+  refreshTokenHash      String?
+  refreshTokenExpiresAt DateTime?
+  // Social login (routes/oauth.js). "local" | "google" | "facebook" | "twitter".
+  // Each OAuth identity is its own User row keyed by the provider's stable
+  // ID — deliberately NOT auto-linked to an existing local account that
+  // happens to share an email, to avoid account-takeover via a spoofed/
+  // reused email on another provider.
+  authProvider   String        @default("local")
+  googleId       String?       @unique
+  facebookId     String?       @unique
+  twitterId      String?       @unique
+  avatarUrl      String?
   squads         UserSquad[]
   transactions   Transaction[]
   createdAt      DateTime      @default(now())
@@ -23,17 +43,42 @@ model Player {
   name         String
   position     String        // GK, DEF, MID, FWD
   currentPrice Decimal       @db.Decimal(5, 1)
-  teamId       Int           // Không đặt FK cứng tới Team: scripts/seed.js còn nạp
-                              // cầu thủ thật từ Sportmonks với teamId nằm ngoài
-                              // phạm vi 10 CLB curated trong bảng Team bên dưới.
+  teamId       Int           // No hard FK to Team: scripts/seed.js also loads
+                              // real players from Sportmonks with teamIds
+                              // outside the range of the 10 curated clubs in
+                              // the Team table below.
   form         String[]
+  // Analytics stats (the "View analytics" radar chart in TransferMarket.vue):
+  // { xG, xA, form, keyPasses, shots, saves? } — only available for the 65
+  // curated players (data/backupPlayers.js). Players bulk-loaded from
+  // Sportmonks/API-Football (scripts/seed.js, seedTop5Free.js) don't have
+  // this data source yet, so this field is null for them (see limitation 7.2).
+  stats        Json?
+  // Player photo (media.api-sports.io) — only available for the ~300
+  // real-dataset players loaded via seedTop5Free.js. The 65 curated players
+  // have no corresponding API-Football ID so this field is null for them;
+  // the frontend falls back to a position badge / shirt number (see
+  // PlayerAvatar in TransferMarket.vue, SquadPitch.vue).
+  photoUrl     String?
+  // Real club name (e.g. "Arsenal") taken directly from API-Football,
+  // replacing the old 10-club curated lookup table (TransferMarket.vue's
+  // getClubName) which only matched teamId 1-10 of the hand-entered dataset
+  // that has since been removed.
+  teamName     String?
+  // Real league name (e.g. "Premier League") — not available at load time
+  // (scripts/seedTop5Free.js, seedRealSquads.js only keep this information
+  // temporarily in memory while seeding, never writing it to the DB).
+  // Backfilled via scripts/backfillLeagueNames.js (5 requests to
+  // /teams?league=X).
+  leagueName   String?
   squadPicks   SquadPick[]
   transactions Transaction[]
+  gameweekStats PlayerGameweekStat[]
 }
 
-// Phục vụ Algorithm 3 (Tactical Fit Analyzer, Section 5.4). Chỉ curate cho
-// 10 CLB dùng trong BACKUP_PLAYERS — TacticalFitService dùng chỉ số trung
-// bình giải đấu khi không tìm thấy Team tương ứng với teamId của cầu thủ.
+// Powers Algorithm 3 (Tactical Fit Analyzer, Section 5.4). Only curated for
+// the 10 clubs used in BACKUP_PLAYERS — TacticalFitService uses the
+// league-average stats when no Team row matches a player's teamId.
 model Team {
   id               Int     @id
   name             String
@@ -44,15 +89,20 @@ model Team {
 }
 
 model UserSquad {
-  id        String      @id @default(uuid())
-  userId    String
-  user      User        @relation(fields: [userId], references: [id])
-  gameweek  Int
-  captainId Int?
-  isLocked  Boolean     @default(false)
-  picks     SquadPick[]
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  gameweek      Int
+  captainId     Int?
+  // Auto-promoted to Captain (2x points) by runMatchday when the real
+  // Captain's PlayerGameweekStat shows minutesPlayed = 0 for this gameweek
+  // (i.e. didn't play) — see services/matchdayService.js.
+  viceCaptainId Int?
+  isLocked      Boolean     @default(false)
+  totalPoints   Int         @default(0) // Total starting-lineup points after /api/matchday/run is run
+  picks         SquadPick[]
 
-  @@unique([userId, gameweek]) // Mỗi user chỉ có 1 đội hình duy nhất mỗi vòng
+  @@unique([userId, gameweek]) // Each user has exactly 1 squad per gameweek
 }
 
 model SquadPick {
@@ -62,6 +112,60 @@ model SquadPick {
   playerId   Int
   player     Player    @relation(fields: [playerId], references: [id])
   isStarting Boolean   @default(true)
+  points     Int       @default(0) // This player's fantasy points after matchday runs (0 if not run yet)
+  // Bench priority order (1 = first substitute, 2 = second, ...). Null for
+  // starting-XI picks. Read by matchdayService's auto-substitution pass to
+  // decide which bench player comes on for a starter who didn't play.
+  benchOrder Int?
+}
+
+// Mock/generated match schedule (Section: no real fixture feed is wired up
+// yet — the real clubs are in their off-season break, so there is no live
+// schedule to pull from any provider right now). homeExpectedGoals/
+// awayExpectedGoals/*WinProb are computed ONCE at seed time by
+// predictionService.js from each club's Team tactical stats (falling back
+// to the league average for the ~90% of real clubs with no curated Team
+// row — same fallback pattern as tacticalFitService). Swap this seed step
+// for a real provider call later without changing the shape consumed by the
+// frontend.
+model Fixture {
+  id                Int      @id @default(autoincrement())
+  gameweek          Int
+  homeTeamId        Int
+  awayTeamId        Int
+  homeTeamName      String
+  awayTeamName      String
+  kickoff           DateTime
+  status            String   @default("SCHEDULED") // SCHEDULED | FINISHED
+  homeScore         Int?
+  awayScore         Int?
+  homeExpectedGoals Float
+  awayExpectedGoals Float
+  homeWinProb       Float
+  drawProb          Float
+  awayWinProb       Float
+
+  @@unique([gameweek, homeTeamId, awayTeamId])
+  @@index([gameweek])
+}
+
+// A player's real match stats for a single gameweek — the input for
+// CalculatePlayerMatchPoints (services/scoringService.js). Loaded via
+// scripts/seedGameweekStats.js or (in the future) a Sportmonks webhook.
+model PlayerGameweekStat {
+  id             String  @id @default(uuid())
+  playerId       Int
+  player         Player  @relation(fields: [playerId], references: [id])
+  gameweek       Int
+  minutesPlayed  Int     @default(0)
+  goals          Int     @default(0)
+  assists        Int     @default(0)
+  yellowCards    Int     @default(0)
+  redCards       Int     @default(0)
+  cleanSheet     Boolean @default(false)
+  saves          Int     @default(0)
+
+  @@unique([playerId, gameweek])
 }
 
 model Transaction {

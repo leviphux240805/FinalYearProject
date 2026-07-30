@@ -53,7 +53,7 @@ async function apiGetWithRetry(path, retries = 3) {
   } catch (error) {
     if (error.response?.status === 429 && retries > 0) {
       const retryAfter = Number(error.response.headers['retry-after']) || 60;
-      console.log(`   ⏳ Rate-limited, chờ ${retryAfter}s...`);
+      console.log(`   ⏳ Rate-limited, waiting ${retryAfter}s...`);
       await sleep(retryAfter * 1000);
       return apiGetWithRetry(path, retries - 1);
     }
@@ -62,30 +62,30 @@ async function apiGetWithRetry(path, retries = 3) {
 }
 
 async function assertDatabaseReady() {
-  if (!process.env.DATABASE_URL) throw new Error('Thiếu DATABASE_URL trong .env');
+  if (!process.env.DATABASE_URL) throw new Error('Missing DATABASE_URL in .env');
   await prisma.$queryRaw`SELECT 1`;
 }
 
 async function seedFromFootballData() {
   if (!API_TOKEN) {
-    throw new Error('Thiếu FOOTBALL_DATA_API_TOKEN trong .env. Đăng ký miễn phí tại https://www.football-data.org/client/register');
+    throw new Error('Missing FOOTBALL_DATA_API_TOKEN in .env. Register for free at https://www.football-data.org/client/register');
   }
 
-  console.log('🔍 Kiểm tra kết nối PostgreSQL...');
+  console.log('🔍 Checking PostgreSQL connection...');
   await assertDatabaseReady();
-  console.log('✅ PostgreSQL sẵn sàng.');
+  console.log('✅ PostgreSQL ready.');
 
   const estimatedMinutes = Math.ceil((TOP5_COMPETITIONS.length + 100) * REQUEST_DELAY_MS / 60000);
-  console.log(`⏳ Bắt đầu hút dữ liệu Top 5 giải đấu châu Âu từ football-data.org...`);
-  console.log(`   (Free plan giới hạn 10 request/phút — dự kiến mất khoảng ${estimatedMinutes} phút)`);
+  console.log(`⏳ Starting to pull Top 5 European league data from football-data.org...`);
+  console.log(`   (Free plan is limited to 10 requests/minute — expected to take about ${estimatedMinutes} minutes)`);
 
   const allPlayers = new Map(); // playerId -> record, dedupes players who appear on multiple loaded rosters
 
   for (const code of TOP5_COMPETITIONS) {
-    console.log(`\n📦 Giải đấu: ${code}`);
+    console.log(`\n📦 League: ${code}`);
     const teamsPayload = await apiGetWithRetry(`/competitions/${code}/teams`);
     const teams = teamsPayload?.teams || [];
-    console.log(`   → ${teams.length} CLB`);
+    console.log(`   → ${teams.length} clubs`);
 
     for (const team of teams) {
       process.stdout.write(`   🔄 ${team.name}...`);
@@ -103,11 +103,11 @@ async function seedFromFootballData() {
           form: ['D', 'D', 'D']
         });
       }
-      console.log(` ${squad.length} cầu thủ (tổng ${allPlayers.size})`);
+      console.log(` ${squad.length} players (total ${allPlayers.size})`);
     }
   }
 
-  console.log(`\n💾 Bắt đầu bơm ${allPlayers.size} cầu thủ vào PostgreSQL...`);
+  console.log(`\n💾 Starting to load ${allPlayers.size} players into PostgreSQL...`);
   const records = Array.from(allPlayers.values());
   let upserted = 0;
   for (const record of records) {
@@ -116,12 +116,12 @@ async function seedFromFootballData() {
     if (upserted % 100 === 0) process.stdout.write(`\r   ...${upserted}/${records.length}`);
   }
 
-  console.log(`\n✅ Seed hoàn tất. ${records.length} cầu thủ từ Top 5 giải đấu đã có trong PostgreSQL.`);
+  console.log(`\n✅ Seed complete. ${records.length} players from the Top 5 leagues are now in PostgreSQL.`);
 }
 
 seedFromFootballData()
   .catch((err) => {
-    console.error('❌ Seed thất bại:', err?.response?.data || err.message);
+    console.error('❌ Seed failed:', err?.response?.data || err.message);
     process.exitCode = 1;
   })
   .finally(async () => {

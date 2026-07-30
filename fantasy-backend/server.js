@@ -4,49 +4,102 @@
 // ============================================================
 require('dotenv').config();
 
-const express    = require('express');
-const http       = require('http');
-const { Server } = require('socket.io');
-const cors       = require('cors');
-const cron       = require('node-cron');
-const redis      = require('redis');
-const axios      = require('axios');
+const express      = require('express');
+const http         = require('http');
+const { Server }   = require('socket.io');
+const cors         = require('cors');
+const cookieParser = require('cookie-parser');
+const cron         = require('node-cron');
+const redis        = require('redis');
+const axios        = require('axios');
+const rateLimit    = require('express-rate-limit');
 const { PrismaClient } = require('@prisma/client');
 
 // --- Routes ---
 const authRoutes        = require('./routes/auth');
+const oauthRoutes       = require('./routes/oauth');
 const leaderboardRoutes = require('./routes/leaderboard');
 const transferRoutes    = require('./routes/transfers');
+const matchdayRoutes    = require('./routes/matchday');
+const squadRoutes       = require('./routes/squad');
+const fixturesRoutes    = require('./routes/fixtures');
 
 // --- Services ---
 const tacticalFitService = require('./services/tacticalFitService');
+const predictionService  = require('./services/predictionService');
+const { calculatePlayerMatchPoints } = require('./services/scoringService');
 
 // ============================================================
-// KHỞI TẠO ỨNG DỤNG
+// APPLICATION SETUP
 // ============================================================
 const app    = express();
 const prisma = new PrismaClient();
+
+// Render (and most PaaS hosts) terminate TLS at a reverse proxy in front of
+// this process, so the connection Node actually sees is plain HTTP — without
+// this, req.protocol always reports "http" even in production, which would
+// silently give routes/oauth.js's callback-URL auto-detection the wrong
+// scheme. `1` = trust exactly one hop of proxy (the platform's own edge),
+// not an arbitrary chain of forwarded-for headers from the public internet.
+app.set('trust proxy', 1);
 
 const SPORTMONKS_BASE_URL = 'https://api.sportmonks.com/v3/football';
 const SPORTMONKS_PLAYER_INCLUDE = process.env.SPORTMONKS_PLAYER_INCLUDE ||
   'trophies.league;trophies.season;trophies.trophy;trophies.team;teams.team;statistics.details.type;statistics.team;statistics.season.league;latest.fixture.participants;latest.fixture.league;latest.fixture.scores;latest.details.type;nationality;detailedPosition;metadata.type';
 
-app.use(cors());
-app.use(express.json());
-
-const server = http.createServer(app);
-const io     = new Server(server, { cors: { origin: '*' } });
+// ============================================================
+// SECURITY HTTP HEADERS
+// Implemented by hand (equivalent to the "helmet" package's defaults) since
+// this sandbox has no registry access to install it — swap in `helmet()` if
+// you `npm install helmet` locally, the effect is the same.
+// ============================================================
+app.disable('x-powered-by'); // don't advertise "Express" to attackers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');       // stop MIME-sniffing away from declared Content-Type
+  res.setHeader('X-Frame-Options', 'DENY');                  // block this API's JSON being framed (clickjacking)
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains'); // no-op over plain HTTP in dev, matters once behind HTTPS
+  next();
+});
 
 // ============================================================
-// KẾT NỐI REDIS (Bảng xếp hạng - O(log N))
+// CORS - restricted to known frontend origin(s), not left wide open.
+// FRONTEND_ORIGIN can be a comma-separated list (e.g. dev + prod URLs).
+// ============================================================
+const allowedOrigins = (process.env.FRONTEND_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    // Allow same-origin/non-browser requests (no Origin header, e.g. curl, mobile) through.
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    console.warn(`[CORS] Blocked request from unlisted origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true // required for the browser to send/receive the httpOnly refreshToken cookie cross-origin
+}));
+app.use(express.json({ limit: '10kb' })); // small JSON bodies expected; caps request-body DoS
+app.use(cookieParser());
+
+const server = http.createServer(app);
+const io     = new Server(server, { cors: { origin: allowedOrigins } });
+
+// ============================================================
+// REDIS CONNECTION (Leaderboard - O(log N))
 // ============================================================
 const redisClient = redis.createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
 
-// Chỉ log lỗi Redis một lần, tránh spam console
+// Only log the Redis error once, to avoid spamming the console — BUT still
+// print the real underlying cause (err.code/err.message) instead of just a
+// generic sentence, so it's still debuggable (ECONNREFUSED = nothing
+// listening on that port, quite different from an auth error or wrong host).
 let redisErrorLogged = false;
 redisClient.on('error', (err) => {
   if (!redisErrorLogged) {
-    console.warn('⚠️  Redis chưa kết nối - Bảng xếp hạng tạm thời không hoạt động.');
+    console.warn(`⚠️  Redis not connected - Leaderboard temporarily disabled. Reason: [${err.code || err.name}] ${err.message}`);
     redisErrorLogged = true;
   }
 });
@@ -54,50 +107,95 @@ redisClient.on('error', (err) => {
 redisClient.connect()
   .then(() => {
     redisErrorLogged = false;
-    console.log('🔌 Redis Cluster đã kết nối thành công!');
+    console.log('🔌 Redis Cluster connected successfully!');
     app.set('redisClient', redisClient);
   })
-  .catch(() => {
-    console.warn('⚠️  Redis offline - Server vẫn chạy bình thường, chỉ tắt tính năng Leaderboard.');
+  .catch((err) => {
+    console.warn(`⚠️  Redis offline - Server still running normally, only the Leaderboard feature is disabled. Reason: [${err.code || err.name}] ${err.message}`);
   });
+
+// ============================================================
+// HEALTH CHECK - used by Render (and by us) to confirm the process is alive
+// and can actually reach Postgres, not just that Node started.
+// ============================================================
+app.get('/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', db: 'connected', redis: redisClient.isReady ? 'connected' : 'unavailable' });
+  } catch (error) {
+    res.status(503).json({ status: 'degraded', db: 'unreachable', error: error.message });
+  }
+});
 
 // ============================================================
 // MOUNT ROUTES
 // ============================================================
 app.use('/api/auth',        authRoutes);
+app.use('/api/auth',        oauthRoutes); // mounted AFTER authRoutes: its /:provider catch-all must not shadow /login, /register, /me, /refresh, /logout
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/transfers',   transferRoutes);
+app.use('/api/matchday',    matchdayRoutes);
+app.use('/api/squad',       squadRoutes);
+app.use('/api/fixtures',    fixturesRoutes);
 
 // ============================================================
-// API: Lấy danh sách cầu thủ
-// Ưu tiên dữ liệu từ Prisma DB (có dynamic pricing), fallback về backup tĩnh
+// API: Get player list
+// ONLY served from PostgreSQL (real players loaded via scripts/seedTop5Free.js).
+// The 65 hand-curated players (data/backupPlayers.js) have been fully
+// removed from every data-serving path — see scripts/removeCuratedPlayers.js.
 // ============================================================
-const BACKUP_PLAYERS = require('./data/backupPlayers');
-
 app.get('/api/players', async (req, res) => {
   try {
-    // Thử lấy từ PostgreSQL (giá có thể đã thay đổi do dynamic pricing)
     const dbPlayers = await prisma.player.findMany({ orderBy: { id: 'asc' } });
-    if (dbPlayers.length > 0) {
-      return res.json(dbPlayers.map(p => ({
-        ...p,
-        price: Number(p.currentPrice),
-        team_id: p.teamId
-      })));
-    }
-  } catch {
-    // DB chưa sẵn sàng - fallback về dữ liệu tĩnh
+    return res.json(dbPlayers.map(p => ({
+      ...p,
+      price: Number(p.currentPrice),
+      team_id: p.teamId
+    })));
+  } catch (error) {
+    console.error('[Players] Database query error:', error.message);
+    return res.status(503).json({
+      success: false,
+      error: 'Could not read the player list from the database. Please run scripts/seedTop5Free.js.'
+    });
   }
-  // Fallback: giả lập độ trễ mạng 0.5s
-  setTimeout(() => res.json(BACKUP_PLAYERS), 500);
 });
 
 // ============================================================
-// ĐỘNG CƠ BIẾN ĐỘNG GIÁ THỊ TRƯỜNG - Chạy lúc 00:00 mỗi đêm
-// Tự động tăng/giảm giá cầu thủ dựa trên cung cầu giao dịch 24h
+// API: Real clubs currently in the game, grouped by league
+// Powers the "Leagues & Clubs" tab — always matches the real player data
+// currently in the database (not a static hard-coded list).
+// ============================================================
+app.get('/api/teams', async (req, res) => {
+  try {
+    const teams = await prisma.player.groupBy({
+      by: ['teamId', 'teamName', 'leagueName'],
+      _count: { id: true }
+    });
+
+    const result = teams
+      .filter(t => t.teamName)
+      .map(t => ({
+        teamId: t.teamId,
+        teamName: t.teamName,
+        leagueName: t.leagueName,
+        playerCount: t._count.id
+      }))
+      .sort((a, b) => (a.leagueName || '').localeCompare(b.leagueName || '') || a.teamName.localeCompare(b.teamName));
+
+    return res.json(result);
+  } catch (error) {
+    console.error('[Teams] Database query error:', error.message);
+    return res.status(503).json({ success: false, error: 'Could not read the club list from the database.' });
+  }
+});
+
+// ============================================================
+// DYNAMIC MARKET PRICING ENGINE - Runs at 00:00 every night
+// Automatically raises/lowers player prices based on 24h transaction demand
 // ============================================================
 cron.schedule('0 0 * * *', async () => {
-  console.log('📉 Kích hoạt động cơ điều tiết giá thị trường tự động...');
+  console.log('📉 Triggering the automatic market pricing engine...');
   try {
     const players = await prisma.player.findMany();
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -109,9 +207,9 @@ cron.schedule('0 0 * * *', async () => {
       ]);
 
       const netDemand = buyCount - sellCount;
-      // Mỗi đơn vị chênh lệch cung/cầu thay đổi $0.1M
+      // Each unit of supply/demand imbalance shifts the price by $0.1M
       let priceChange = netDemand * 0.1;
-      // Biên độ dao động tối đa $0.3M/ngày để tránh bong bóng tài chính
+      // Capped at ±$0.3M/day to prevent a financial bubble
       priceChange = Math.max(-0.3, Math.min(0.3, priceChange));
 
       if (priceChange !== 0) {
@@ -123,14 +221,14 @@ cron.schedule('0 0 * * *', async () => {
         console.log(`  → ${player.name}: ${priceChange > 0 ? '+' : ''}${priceChange.toFixed(1)} → $${newPrice.toFixed(1)}M`);
       }
     }
-    console.log('✅ Đã cập nhật xong bảng giá mới cho toàn bộ thị trường!');
+    console.log('✅ Finished updating the new price board for the whole market!');
   } catch (error) {
-    console.error('❌ Lỗi cập nhật giá thị trường:', error.message);
+    console.error('❌ Error updating market prices:', error.message);
   }
 });
 
 // ============================================================
-// LUỒNG CẬP NHẬT ĐIỂM SỐ THỜI GIAN THỰC VÀO REDIS LEADERBOARD
+// REAL-TIME SCORE UPDATE PIPELINE INTO THE REDIS LEADERBOARD
 // ============================================================
 async function updateUserLiveScore(userId, pointsAdded) {
   if (!redisClient.isReady) return null;
@@ -140,7 +238,7 @@ async function updateUserLiveScore(userId, pointsAdded) {
 }
 
 // ============================================================
-// API: HỆ THỐNG MỞ THẺ GACHA (PACK OPENING)
+// API: GACHA CARD PACK OPENING SYSTEM
 // ============================================================
 
 const getRarity = (price) => {
@@ -150,34 +248,50 @@ const getRarity = (price) => {
   return                    { tier: 'COMMON',     weight: 50, color: '#bdc3c7' }; // ~50%
 };
 
-app.post('/api/gacha/open', (req, res) => {
+app.post('/api/gacha/open', async (req, res) => {
   const { userId } = req.body;
 
-  // Gắn rarity vào từng cầu thủ
-  const pool = BACKUP_PLAYERS.map(p => ({ ...p, rarity: getRarity(p.price) }));
+  try {
+    // The gacha pool is pulled straight from PostgreSQL (real players
+    // loaded via seedTop5Free.js) — the curated BACKUP_PLAYERS is no longer used.
+    const dbPlayers = await prisma.player.findMany();
+    if (dbPlayers.length === 0) {
+      return res.status(503).json({ success: false, error: 'No players in the database yet. Please run scripts/seedTop5Free.js first.' });
+    }
 
-  // Thuật toán Weighted Random
-  const totalWeight = pool.reduce((sum, p) => sum + p.rarity.weight, 0);
-  let roll = Math.random() * totalWeight;
+    const pool = dbPlayers.map(p => ({
+      ...p,
+      price: Number(p.currentPrice),
+      team_id: p.teamId,
+      rarity: getRarity(Number(p.currentPrice)),
+    }));
 
-  let pulledPlayer = pool[pool.length - 1]; // fallback
-  for (const player of pool) {
-    if (roll < player.rarity.weight) { pulledPlayer = player; break; }
-    roll -= player.rarity.weight;
+    // Weighted Random algorithm
+    const totalWeight = pool.reduce((sum, p) => sum + p.rarity.weight, 0);
+    let roll = Math.random() * totalWeight;
+
+    let pulledPlayer = pool[pool.length - 1]; // fallback
+    for (const player of pool) {
+      if (roll < player.rarity.weight) { pulledPlayer = player; break; }
+      roll -= player.rarity.weight;
+    }
+
+    console.log(`[GACHA] User ${userId || 'anonymous'} just pulled: ${pulledPlayer.name} (${pulledPlayer.rarity.tier})`);
+
+    res.json({
+      success: true,
+      player: pulledPlayer,
+      message: `Congratulations! You received a ${pulledPlayer.rarity.tier} card`
+    });
+  } catch (error) {
+    console.error('[GACHA] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Could not open the pack.' });
   }
-
-  console.log(`[GACHA] User ${userId || 'anonymous'} vừa quay ra: ${pulledPlayer.name} (${pulledPlayer.rarity.tier})`);
-
-  res.json({
-    success: true,
-    player: pulledPlayer,
-    message: `Chúc mừng! Bạn đã nhận được thẻ ${pulledPlayer.rarity.tier}`
-  });
 });
 
 // ============================================================
-// API: Lấy hồ sơ chi tiết cầu thủ từ Sportmonks
-// Ví dụ: /api/players/32695/profile (32695 là Sportmonks player id)
+// API: Get detailed player profile from Sportmonks
+// Example: /api/players/32695/profile (32695 is the Sportmonks player id)
 // ============================================================
 app.get('/api/players/:id/profile', async (req, res) => {
   const { id } = req.params;
@@ -195,14 +309,14 @@ app.get('/api/players/:id/profile', async (req, res) => {
   if (!apiToken) {
     return res.status(503).json({
       success: false,
-      error: 'Thiếu SPORTMONKS_API_TOKEN trong .env'
+      error: 'Missing SPORTMONKS_API_TOKEN in .env'
     });
   }
 
   if (!includeDepthValid) {
     return res.status(400).json({
       success: false,
-      error: 'Include depth vượt quá 3 levels (theo giới hạn endpoint Player).'
+      error: 'Include depth exceeds 3 levels (per the Player endpoint limit).'
     });
   }
 
@@ -222,7 +336,7 @@ app.get('/api/players/:id/profile', async (req, res) => {
 
     const player = response?.data?.data;
     if (!player) {
-      return res.status(404).json({ success: false, error: 'Không tìm thấy cầu thủ trên Sportmonks' });
+      return res.status(404).json({ success: false, error: 'Player not found on Sportmonks' });
     }
 
     const profile = {
@@ -249,7 +363,7 @@ app.get('/api/players/:id/profile', async (req, res) => {
     const detail = error?.response?.data || error.message;
     return res.status(status).json({
       success: false,
-      error: 'Không thể lấy profile từ Sportmonks',
+      error: 'Could not fetch profile from Sportmonks',
       detail
     });
   }
@@ -257,29 +371,21 @@ app.get('/api/players/:id/profile', async (req, res) => {
 
 // ============================================================
 // API: Tactical Fit Analyzer (Algorithm 3, Section 5.4)
-// Điểm 0-100 dựa trên vị trí thi đấu + phong cách chiến thuật CLB
+// A 0-100 score based on playing position + club tactical style
 // ============================================================
 app.get('/api/players/:id/tactical-fit', async (req, res) => {
   const playerId = Number(req.params.id);
   if (!Number.isFinite(playerId)) {
-    return res.status(400).json({ success: false, error: 'ID cầu thủ không hợp lệ.' });
+    return res.status(400).json({ success: false, error: 'Invalid player ID.' });
   }
 
   try {
-    let position, teamId;
-
     const dbPlayer = await prisma.player.findUnique({ where: { id: playerId } });
-    if (dbPlayer) {
-      position = dbPlayer.position;
-      teamId = dbPlayer.teamId;
-    } else {
-      const fallback = BACKUP_PLAYERS.find(p => p.id === playerId);
-      if (!fallback) {
-        return res.status(404).json({ success: false, error: 'Không tìm thấy cầu thủ.' });
-      }
-      position = fallback.position;
-      teamId = fallback.team_id;
+    if (!dbPlayer) {
+      return res.status(404).json({ success: false, error: 'Player not found.' });
     }
+    const position = dbPlayer.position;
+    const teamId = dbPlayer.teamId;
 
     const team = await prisma.team.findUnique({ where: { id: teamId } });
     const teamStats = team ? {
@@ -293,17 +399,139 @@ app.get('/api/players/:id/tactical-fit', async (req, res) => {
 
     res.json({ success: true, score, position, teamName: team?.name || null });
   } catch (error) {
-    console.error('[TacticalFit] Lỗi:', error.message);
-    res.status(500).json({ success: false, error: 'Không thể tính Tactical Fit.' });
+    console.error('[TacticalFit] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Could not compute Tactical Fit.' });
   }
 });
 
 // ============================================================
-// IDEMPOTENCY CACHE - Chống xử lý trùng eventId từ webhook
-// TTL-based, giống mô tả trong tài liệu (TC-038): eventId được
-// nhớ trong một khoảng thời gian, quá hạn thì tự động dọn dẹp.
+// API: Projected Fantasy Points per upcoming gameweek (feedback item A7)
+// Example: /api/players/32695/projected-points?gameweeks=2,3,4
+// Looks up the player's club fixture in each requested gameweek and scales
+// their historical xG/xA (when available) by predictionService's estimate
+// of that fixture — see predictionService.js for the full explanation of
+// why this is a heuristic estimate, not a guarantee.
 // ============================================================
-const EVENT_DEDUP_TTL_MS = 10 * 60 * 1000; // 10 phút
+app.get('/api/players/:id/projected-points', async (req, res) => {
+  const playerId = Number(req.params.id);
+  if (!Number.isFinite(playerId)) {
+    return res.status(400).json({ success: false, error: 'Invalid player ID.' });
+  }
+
+  const gameweeks = String(req.query.gameweeks || '')
+    .split(',')
+    .map(g => Number(g.trim()))
+    .filter(g => Number.isFinite(g) && g > 0);
+
+  if (gameweeks.length === 0) {
+    return res.status(400).json({ success: false, error: 'Provide at least one gameweek, e.g. ?gameweeks=2,3,4' });
+  }
+
+  try {
+    const player = await prisma.player.findUnique({ where: { id: playerId } });
+    if (!player) {
+      return res.status(404).json({ success: false, error: 'Player not found.' });
+    }
+
+    const fixtures = await prisma.fixture.findMany({
+      where: {
+        gameweek: { in: gameweeks },
+        OR: [{ homeTeamId: player.teamId }, { awayTeamId: player.teamId }],
+      },
+    });
+    const fixtureByGameweek = new Map(fixtures.map(f => [f.gameweek, f]));
+
+    const breakdown = gameweeks.map((gameweek) => {
+      const fixture = fixtureByGameweek.get(gameweek);
+      if (!fixture) {
+        return { gameweek, hasFixture: false, opponent: null, projectedPoints: 0 };
+      }
+
+      const isHome = fixture.homeTeamId === player.teamId;
+      const teamExpectedGoals = isHome ? fixture.homeExpectedGoals : fixture.awayExpectedGoals;
+      const opponentExpectedGoals = isHome ? fixture.awayExpectedGoals : fixture.homeExpectedGoals;
+      const opponent = isHome ? fixture.awayTeamName : fixture.homeTeamName;
+
+      const projectedPoints = projectionForFixture(player, teamExpectedGoals, opponentExpectedGoals);
+      return { gameweek, hasFixture: true, opponent, isHome, projectedPoints };
+    });
+
+    const totalProjectedPoints = Math.round(breakdown.reduce((sum, b) => sum + b.projectedPoints, 0) * 10) / 10;
+
+    res.json({ success: true, playerId, position: player.position, breakdown, totalProjectedPoints });
+  } catch (error) {
+    console.error('[ProjectedPoints] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Could not compute projected points.' });
+  }
+});
+
+function projectionForFixture(player, teamExpectedGoals, opponentExpectedGoals) {
+  return predictionService.projectPlayerPoints({ player, teamExpectedGoals, opponentExpectedGoals });
+}
+
+// ============================================================
+// API: Per-gameweek match history for ONE player (feedback item A1 —
+// "chọn cầu thủ phải có bảng chi tiết: điểm số từng vòng, số trận thi đấu,
+// số phút thi đấu"). Reads directly from PlayerGameweekStat, so it
+// naturally covers however many gameweeks have real data seeded (currently
+// GW1 only, for the subset of players matched by
+// scripts/removeCuratedPlayers.js — see that file's comment) and reports an
+// honest empty list for the rest, rather than fabricating history.
+// ============================================================
+app.get('/api/players/:id/history', async (req, res) => {
+  const playerId = Number(req.params.id);
+  if (!Number.isFinite(playerId)) {
+    return res.status(400).json({ success: false, error: 'Invalid player ID.' });
+  }
+
+  try {
+    const player = await prisma.player.findUnique({ where: { id: playerId } });
+    if (!player) {
+      return res.status(404).json({ success: false, error: 'Player not found.' });
+    }
+
+    const statRows = await prisma.playerGameweekStat.findMany({
+      where: { playerId },
+      orderBy: { gameweek: 'asc' },
+    });
+
+    const history = statRows.map((s) => ({
+      gameweek: s.gameweek,
+      minutesPlayed: s.minutesPlayed,
+      goals: s.goals,
+      assists: s.assists,
+      yellowCards: s.yellowCards,
+      redCards: s.redCards,
+      cleanSheet: s.cleanSheet,
+      saves: s.saves,
+      points: calculatePlayerMatchPoints(s, player.position, false),
+    }));
+
+    const matchesPlayed = history.filter((h) => h.minutesPlayed > 0).length;
+    const totalPoints = history.reduce((sum, h) => sum + h.points, 0);
+
+    res.json({
+      success: true,
+      playerId,
+      name: player.name,
+      position: player.position,
+      matchesPlayed,
+      totalPoints,
+      history,
+    });
+  } catch (error) {
+    console.error('[PlayerHistory] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Could not load this player\'s match history.' });
+  }
+});
+
+// ============================================================
+// IDEMPOTENCY CACHE - Prevents duplicate processing of a webhook eventId
+// TTL-based, matching the description in the report (TC-038): an eventId
+// is remembered for a window of time, then automatically cleaned up once
+// it expires.
+// ============================================================
+const EVENT_DEDUP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const processedEvents = new Map(); // eventId -> timestamp
 
 function isDuplicateEvent(eventId) {
@@ -320,29 +548,40 @@ function isDuplicateEvent(eventId) {
 }
 
 // ============================================================
-// API WEBHOOK: Giả lập Sportmonks bắn sự kiện live
+// WEBHOOK API: Simulates Sportmonks firing a live event
 // ============================================================
-app.post('/api/webhook/simulate', async (req, res) => {
+// 100 requests per minute per IP — a real provider's webhook fan-out can
+// legitimately burst, so this caps abuse without throttling normal traffic.
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many webhook requests. Please slow down.' }
+});
+
+app.post('/api/webhook/simulate', webhookLimiter, async (req, res) => {
   const { playerId, action, points, userId, eventId, gameweek } = req.body;
 
   if (isDuplicateEvent(eventId)) {
-    console.log(`[Webhook] Bỏ qua sự kiện trùng lặp: eventId=${eventId}`);
-    return res.json({ success: true, message: 'Sự kiện trùng lặp đã bị bỏ qua.', duplicate: true });
+    console.log(`[Webhook] Skipping duplicate event: eventId=${eventId}`);
+    return res.json({ success: true, message: 'Duplicate event was skipped.', duplicate: true });
   }
 
-  console.log(`[Webhook] Cầu thủ ${playerId} -> ${action} (+${points} pts)`);
+  console.log(`[Webhook] Player ${playerId} -> ${action} (+${points} pts)`);
 
-  // Chỉ phát tới các client đang xem đúng gameweek này (room-based fan-out),
-  // thay vì io.emit toàn cục, để chi phí broadcast tỉ lệ với số client quan
-  // tâm chứ không phải tổng số kết nối.
+  // Only broadcasts to clients currently viewing this exact gameweek
+  // (room-based fan-out), instead of a global io.emit, so broadcast cost
+  // scales with the number of interested clients rather than the total
+  // connection count.
   const room = `gameweek_${gameweek || 1}`;
   io.to(room).emit('LIVE_SCORE_UPDATE', {
     playerId,
-    message: `${action}! (+${points} điểm)`,
+    message: `${action}! (+${points} points)`,
     pointsAdded: points
   });
 
-  // Cập nhật bảng xếp hạng Redis nếu có userId
+  // Update the Redis leaderboard if a userId was provided
   if (userId) {
     const rankData = await updateUserLiveScore(userId, points);
     if (rankData) {
@@ -350,28 +589,28 @@ app.post('/api/webhook/simulate', async (req, res) => {
     }
   }
 
-  res.json({ success: true, message: 'Đã phát sóng sự kiện qua WebSockets!' });
+  res.json({ success: true, message: 'Event broadcast over WebSockets!' });
 });
 
 // ============================================================
-// SOCKET.IO - Kết nối thời gian thực
+// SOCKET.IO - Real-time connections
 // ============================================================
 io.on('connection', (socket) => {
-  console.log('🟢 Client kết nối:', socket.id);
+  console.log('🟢 Client connected:', socket.id);
 
   socket.on('join_gameweek', (gameweek) => {
     const room = `gameweek_${gameweek || 1}`;
     socket.join(room);
-    console.log(`   ↳ ${socket.id} tham gia phòng ${room}`);
+    console.log(`   ↳ ${socket.id} joined room ${room}`);
   });
 
   socket.on('disconnect', () => {
-    console.log('🔴 Client ngắt kết nối:', socket.id);
+    console.log('🔴 Client disconnected:', socket.id);
   });
 });
 
 // ============================================================
-// KHỞI ĐỘNG SERVER
+// START SERVER
 // ============================================================
 const PORT = process.env.PORT || 3000;
 
