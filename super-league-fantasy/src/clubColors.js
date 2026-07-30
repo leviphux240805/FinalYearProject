@@ -115,6 +115,17 @@ export function getClubColor(teamName) {
   return CLUB_COLORS[teamName] || fallbackColor(teamName);
 }
 
+// Real club crest image. Player.teamId (see seedTop5Free.js) is the club's
+// actual API-Football team id, and api-sports.io serves crests at this exact
+// predictable CDN path keyed by that same id — no extra API call or new DB
+// column needed. Curated/legacy players without a real API-Football teamId
+// will just 404 on this URL; callers should hide the <img> on @error (see
+// TransferMarket.vue's onClubBadgeError), the same pattern already used for
+// player photos.
+export function getClubBadgeUrl(teamId) {
+  return teamId ? `https://media.api-sports.io/football/teams/${teamId}.png` : null;
+}
+
 // Rough perceived-brightness check so text/border drawn ON a club color
 // picks black or white for contrast, instead of assuming white always works
 // (e.g. Dortmund's yellow, Barcelona's gold trim).

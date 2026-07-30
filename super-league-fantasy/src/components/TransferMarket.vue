@@ -65,7 +65,23 @@
               <span class="info-icon" title="View analytics">📈</span>
             </td>
             <td class="club-cell">
-              <div class="cell-center">
+              <div class="cell-center club-badges-group">
+                <img
+                  v-if="getLeagueBadgeUrl(player.leagueName) && !brokenLeagueBadgeIds.has(player.leagueName)"
+                  :src="getLeagueBadgeUrl(player.leagueName)"
+                  class="league-badge-icon"
+                  alt=""
+                  :title="player.leagueName || ''"
+                  @error="onLeagueBadgeError(player.leagueName)"
+                />
+                <img
+                  v-if="getClubBadgeUrl(player.teamId) && !brokenClubBadgeIds.has(player.teamId)"
+                  :src="getClubBadgeUrl(player.teamId)"
+                  class="club-badge-icon"
+                  alt=""
+                  :title="player.teamName || ''"
+                  @error="onClubBadgeError(player.teamId)"
+                />
                 <span class="club-badge" :style="clubBadgeStyle(player)" :title="player.teamName || ''">{{ getClubName(player) }}</span>
               </div>
             </td>
@@ -158,7 +174,8 @@ import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { globalStore, API_BASE } from '../store';
 import Chart from 'chart.js/auto';
 import { useAnimatedNumber } from '../composables/useAnimatedNumber';
-import { getClubColor, isLightColor } from '../clubColors';
+import { getClubColor, isLightColor, getClubBadgeUrl } from '../clubColors';
+import { getLeagueBadgeUrl } from '../leagueBadges';
 
 const store = globalStore;
 const animatedWallet = useAnimatedNumber(() => Number(store.budget));
@@ -176,6 +193,15 @@ const marketPlayers = ref([]);
 // of showing a broken image icon.
 const brokenPhotoIds = reactive(new Set());
 const onPhotoError = (id) => brokenPhotoIds.add(id);
+// Same broken-image fallback pattern as player photos, applied to the two
+// new market badges (club crest + league/competition crest) — a handful of
+// clubs/leagues outside the Top-5 dataset (or any leftover curated player
+// with a non-API-Football teamId) will 404 on the media.api-sports.io CDN,
+// so these hide themselves instead of showing a broken-image icon.
+const brokenClubBadgeIds = reactive(new Set());
+const brokenLeagueBadgeIds = reactive(new Set());
+const onClubBadgeError = (teamId) => brokenClubBadgeIds.add(teamId);
+const onLeagueBadgeError = (leagueName) => brokenLeagueBadgeIds.add(leagueName);
 const searchQuery = ref('');
 const posFilter = ref('ALL');
 const sortBy = ref('default');
@@ -564,8 +590,8 @@ const closeAnalytics = () => {
 .market-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .market-table thead tr { background: #252e35; }
 .market-table th { padding: 11px 10px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #8a9bad; border-bottom: 2px solid #0fb9b1; white-space: nowrap; overflow: hidden; position: sticky; top: 0; z-index: 5; background-color: #2d3436; }
-.col-player { width: 42%; }
-.col-club   { width: 10%; }
+.col-player { width: 38%; }
+.col-club   { width: 14%; }
 .col-form   { width: 12%; }
 .col-price  { width: 16%; }
 .col-action { width: 20%; text-align: right; }
@@ -606,6 +632,9 @@ const closeAnalytics = () => {
 .GK  { background: linear-gradient(135deg, #6c3483, #9b59b6); }
 
 /* Club badge */
+.club-badges-group { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.club-badge-icon { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; background: rgba(255,255,255,0.06); border-radius: 4px; }
+.league-badge-icon { width: 16px; height: 16px; object-fit: contain; flex-shrink: 0; opacity: 0.9; }
 .club-badge { display: inline-block; background: rgba(99,110,114,0.25); color: #a4b0be; font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px; padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(99,110,114,0.45); white-space: nowrap; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
 
 /* Price */
