@@ -37,7 +37,6 @@
         <colgroup>
           <col class="col-player" />
           <col class="col-club" />
-          <col class="col-form" />
           <col class="col-price" />
           <col class="col-action" />
         </colgroup>
@@ -45,7 +44,6 @@
           <tr>
             <th class="col-player">Player</th>
             <th class="col-club">Club</th>
-            <th class="col-form">Form</th>
             <th class="col-price">Price</th>
             <th class="col-action">Action</th>
           </tr>
@@ -60,38 +58,36 @@
                 alt=""
                 @error="onPhotoError(player.id)"
               />
-              <span :class="'pos-badge ' + player.position">{{ player.position }}</span>
-              <span class="player-name">{{ player.name }}</span>
+              <div v-else class="player-photo player-photo-fallback">
+                <span :class="'pos-badge pos-badge-lg ' + player.position">{{ player.position }}</span>
+              </div>
+              <div class="player-name-wrap">
+                <span class="player-name">{{ player.name }}</span>
+                <span :class="'pos-badge ' + player.position">{{ player.position }}</span>
+              </div>
               <span class="info-icon" title="View analytics">📈</span>
             </td>
             <td class="club-cell">
               <div class="cell-center club-badges-group">
-                <img
-                  v-if="getLeagueBadgeUrl(player.leagueName) && !brokenLeagueBadgeIds.has(player.leagueName)"
-                  :src="getLeagueBadgeUrl(player.leagueName)"
-                  class="league-badge-icon"
-                  alt=""
-                  :title="player.leagueName || ''"
-                  @error="onLeagueBadgeError(player.leagueName)"
-                />
-                <img
-                  v-if="getClubBadgeUrl(player.teamId) && !brokenClubBadgeIds.has(player.teamId)"
-                  :src="getClubBadgeUrl(player.teamId)"
-                  class="club-badge-icon"
-                  alt=""
-                  :title="player.teamName || ''"
-                  @error="onClubBadgeError(player.teamId)"
-                />
+                <div class="club-league-icons">
+                  <img
+                    v-if="getClubBadgeUrl(player.teamId) && !brokenClubBadgeIds.has(player.teamId)"
+                    :src="getClubBadgeUrl(player.teamId)"
+                    class="club-badge-icon"
+                    alt=""
+                    :title="player.teamName || ''"
+                    @error="onClubBadgeError(player.teamId)"
+                  />
+                  <img
+                    v-if="getLeagueBadgeUrl(player.leagueName) && !brokenLeagueBadgeIds.has(player.leagueName)"
+                    :src="getLeagueBadgeUrl(player.leagueName)"
+                    class="league-badge-icon"
+                    alt=""
+                    :title="player.leagueName || ''"
+                    @error="onLeagueBadgeError(player.leagueName)"
+                  />
+                </div>
                 <span class="club-badge" :style="clubBadgeStyle(player)" :title="player.teamName || ''">{{ getClubName(player) }}</span>
-              </div>
-            </td>
-            <td class="form-cell">
-              <div class="cell-center form-indicator">
-              <span v-for="(f, i) in (player.form || [])"
-                :key="i"
-                :class="['form-dot', f === 'W' ? 'win' : f === 'D' ? 'draw' : 'lose']"
-                :title="f === 'W' ? 'Win' : f === 'D' ? 'Draw' : 'Loss'"
-              ></span>
               </div>
             </td>
             <td class="price-cell"><div class="cell-center price-text">${{ player.price.toFixed(1) }}M</div></td>
@@ -590,27 +586,28 @@ const closeAnalytics = () => {
 .market-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .market-table thead tr { background: #252e35; }
 .market-table th { padding: 11px 10px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #8a9bad; border-bottom: 2px solid #0fb9b1; white-space: nowrap; overflow: hidden; position: sticky; top: 0; z-index: 5; background-color: #2d3436; }
-.col-player { width: 38%; }
-.col-club   { width: 14%; }
-.col-form   { width: 12%; }
+.col-player { width: 40%; }
+.col-club   { width: 24%; }
 .col-price  { width: 16%; }
 .col-action { width: 20%; text-align: right; }
 .market-table th.col-club,
-.market-table th.col-form,
 .market-table th.col-price { text-align: center; }
 
 /* Rows */
 .market-row { transition: background 0.15s; }
 .market-row:nth-child(even) { background: rgba(255,255,255,0.02); }
 .market-row:hover { background: rgba(15,185,177,0.07); }
-.market-table td { padding: 12px 10px; border-bottom: 1px solid rgba(47,54,64,0.8); vertical-align: middle; overflow: hidden; height: 60px; }
+.market-table td { padding: 10px; border-bottom: 1px solid rgba(47,54,64,0.8); vertical-align: middle; overflow: hidden; height: 76px; }
 .col-price.price-cell { padding-right: 14px; }
 .col-action.action-cell { padding-left: 14px; }
 
 /* Player cell */
-.player-name-cell { cursor: pointer; display: flex; align-items: center; gap: 10px; min-width: 0; }
-.player-photo { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; object-position: top center; flex-shrink: 0; background: #1e272e; border: 1px solid rgba(255,255,255,0.15); }
-.player-name { color: #e0e6ed; font-weight: 600; font-size: 14px; white-space: nowrap; transition: color 0.15s; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.player-name-cell { cursor: pointer; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.player-photo { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; object-position: top center; flex-shrink: 0; background: #1e272e; border: 2px solid rgba(255,255,255,0.15); }
+.player-photo-fallback { display: flex; align-items: center; justify-content: center; }
+.pos-badge-lg { font-size: 12px; padding: 6px 8px; }
+.player-name-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; flex: 1; min-width: 0; }
+.player-name { color: #e0e6ed; font-weight: 600; font-size: 14.5px; white-space: nowrap; transition: color 0.15s; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .market-row:hover .player-name { color: #0fb9b1; }
 .info-icon { font-size: 13px; opacity: 0; transition: opacity 0.2s; cursor: pointer; flex-shrink: 0; }
 .market-row:hover .info-icon { opacity: 1; }
@@ -619,7 +616,6 @@ const closeAnalytics = () => {
 .cell-right { display: inline-flex; align-items: center; justify-content: flex-end; width: 100%; }
 
 .club-cell,
-.form-cell,
 .price-cell { text-align: center; }
 
 .action-cell { text-align: right; white-space: nowrap; }
@@ -631,11 +627,13 @@ const closeAnalytics = () => {
 .DEF { background: linear-gradient(135deg, #1a5276, #2980b9); }
 .GK  { background: linear-gradient(135deg, #6c3483, #9b59b6); }
 
-/* Club badge */
-.club-badges-group { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
-.club-badge-icon { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; background: rgba(255,255,255,0.06); border-radius: 4px; }
-.league-badge-icon { width: 16px; height: 16px; object-fit: contain; flex-shrink: 0; opacity: 0.9; }
-.club-badge { display: inline-block; background: rgba(99,110,114,0.25); color: #a4b0be; font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px; padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(99,110,114,0.45); white-space: nowrap; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+/* Club badge — enlarged real crest + league crest, colored name pill kept as
+   a fallback/caption underneath (still shows even if both images 404). */
+.club-badges-group { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 0; }
+.club-league-icons { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.club-badge-icon { width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; background: rgba(255,255,255,0.06); border-radius: 6px; padding: 2px; }
+.league-badge-icon { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; opacity: 0.95; }
+.club-badge { display: inline-block; background: rgba(99,110,114,0.25); color: #a4b0be; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; padding: 3px 9px; border-radius: 20px; border: 1px solid rgba(99,110,114,0.45); white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
 
 /* Price */
 .price-text { font-family: 'Courier New', monospace; font-size: 14px; font-weight: 700; color: #f7b731; letter-spacing: 0.3px; white-space: nowrap; }

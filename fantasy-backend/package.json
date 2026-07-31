@@ -13,6 +13,7 @@
     "seed:curated": "node scripts/seedCuratedPlayers.js",
     "seed:top5": "node scripts/seedFootballData.js",
     "seed:top5-free": "node scripts/seedTop5Free.js",
+    "backfill:nationality": "node scripts/backfillNationality.js",
     "seed:gw1": "node scripts/seedGameweekStats.js",
     "seed:remove-curated": "node scripts/removeCuratedPlayers.js",
     "seed:real-squads": "node scripts/seedRealSquads.js",

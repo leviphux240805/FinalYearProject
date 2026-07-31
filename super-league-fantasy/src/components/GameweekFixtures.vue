@@ -14,10 +14,48 @@
     <div v-else class="fixtures-list">
       <div v-for="f in fixtures" :key="f.id" class="fixture-card">
         <div class="fixture-teams">
-          <span class="team-name home">{{ f.homeTeamName }}</span>
+          <div class="team-block home">
+            <div class="team-badge-stack">
+              <img
+                v-if="getClubBadgeUrl(f.homeTeamId) && !brokenClubBadgeIds.has(f.homeTeamId)"
+                :src="getClubBadgeUrl(f.homeTeamId)"
+                class="team-club-badge"
+                alt=""
+                @error="onClubBadgeError(f.homeTeamId)"
+              />
+              <img
+                v-if="getLeagueBadgeUrl(leagueOf(f.homeTeamId)) && !brokenLeagueBadgeIds.has(leagueOf(f.homeTeamId))"
+                :src="getLeagueBadgeUrl(leagueOf(f.homeTeamId))"
+                class="team-league-badge"
+                :alt="leagueOf(f.homeTeamId) || ''"
+                :title="leagueOf(f.homeTeamId) || ''"
+                @error="onLeagueBadgeError(leagueOf(f.homeTeamId))"
+              />
+            </div>
+            <span class="team-name home">{{ f.homeTeamName }}</span>
+          </div>
           <span class="fixture-score" v-if="f.status === 'FINISHED'">{{ f.homeScore }} - {{ f.awayScore }}</span>
           <span class="fixture-vs" v-else>vs</span>
-          <span class="team-name away">{{ f.awayTeamName }}</span>
+          <div class="team-block away">
+            <span class="team-name away">{{ f.awayTeamName }}</span>
+            <div class="team-badge-stack">
+              <img
+                v-if="getLeagueBadgeUrl(leagueOf(f.awayTeamId)) && !brokenLeagueBadgeIds.has(leagueOf(f.awayTeamId))"
+                :src="getLeagueBadgeUrl(leagueOf(f.awayTeamId))"
+                class="team-league-badge"
+                :alt="leagueOf(f.awayTeamId) || ''"
+                :title="leagueOf(f.awayTeamId) || ''"
+                @error="onLeagueBadgeError(leagueOf(f.awayTeamId))"
+              />
+              <img
+                v-if="getClubBadgeUrl(f.awayTeamId) && !brokenClubBadgeIds.has(f.awayTeamId)"
+                :src="getClubBadgeUrl(f.awayTeamId)"
+                class="team-club-badge"
+                alt=""
+                @error="onClubBadgeError(f.awayTeamId)"
+              />
+            </div>
+          </div>
         </div>
         <div class="fixture-meta">
           <span class="fixture-status" :class="f.status.toLowerCase()">{{ f.status === 'FINISHED' ? 'FT' : 'Upcoming' }}</span>
@@ -41,13 +79,30 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { API_BASE } from '../store';
+import { getClubBadgeUrl } from '../clubColors';
+import { getLeagueBadgeUrl } from '../leagueBadges';
 
 const gameweeks = ref([1]);
 const selectedGameweek = ref(1);
 const fixtures = ref([]);
 const loading = ref(false);
+
+// Fixture rows only carry teamId/teamName (see routes/fixtures.js), not
+// leagueName — and since scripts/seedFixtures.js pairs clubs across ALL 5
+// leagues together rather than grouping by league, a fixture's two teams
+// can genuinely belong to different leagues, so there's no single "this
+// fixture's league" badge to show. Instead this builds a teamId ->
+// leagueName lookup (from the same /api/teams endpoint LeaguesInfo.vue
+// already uses) so each SIDE of the fixture shows its own real league badge.
+const teamLeagueById = reactive(new Map());
+const leagueOf = (teamId) => teamLeagueById.get(teamId) || null;
+
+const brokenClubBadgeIds = reactive(new Set());
+const brokenLeagueBadgeIds = reactive(new Set());
+const onClubBadgeError = (teamId) => brokenClubBadgeIds.add(teamId);
+const onLeagueBadgeError = (leagueName) => brokenLeagueBadgeIds.add(leagueName);
 
 const formatKickoff = (iso) => {
   try {
@@ -82,6 +137,13 @@ onMounted(async () => {
   } catch (err) {
     console.error('[GameweekFixtures] Could not load gameweek list:', err.message);
   }
+  try {
+    const res = await fetch(`${API_BASE}/teams`);
+    const teams = await res.json();
+    for (const t of teams) teamLeagueById.set(t.teamId, t.leagueName);
+  } catch (err) {
+    console.error('[GameweekFixtures] Could not load team/league lookup:', err.message);
+  }
   await loadFixtures();
 });
 </script>
@@ -104,7 +166,13 @@ onMounted(async () => {
 .fixtures-list { display: flex; flex-direction: column; gap: 10px; }
 .fixture-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 14px; }
 .fixture-teams { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 700; }
-.team-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-block { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.team-block.away { flex-direction: row-reverse; }
+.team-badge-stack { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; }
+.team-club-badge { width: 32px; height: 32px; object-fit: contain; background: rgba(255,255,255,0.06); border-radius: 6px; padding: 2px; }
+.team-league-badge { position: absolute; bottom: -3px; right: -3px; width: 15px; height: 15px; object-fit: contain; border-radius: 3px; background: #1a2228; padding: 1px; box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
+.team-block.away .team-league-badge { right: auto; left: -3px; }
+.team-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .team-name.away { text-align: right; }
 .fixture-score { font-family: 'Courier New', monospace; font-weight: 900; color: #55efc4; padding: 0 10px; flex-shrink: 0; }
 .fixture-vs { color: #7f8fa6; font-size: 11px; padding: 0 10px; flex-shrink: 0; }

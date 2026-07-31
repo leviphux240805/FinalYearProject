@@ -135,6 +135,9 @@ async function upsertPlayersFromPage(players, leagueId) {
       // previously being ignored.
       photoUrl: entry.player?.photo || null,
       teamName: stats.team?.name || null,
+      // Already present on this same response at no extra request cost —
+      // just wasn't being read before scripts/backfillNationality.js needed it.
+      nationality: entry.player?.nationality || null,
     };
     await prisma.player.upsert({ where: { id: record.id }, update: record, create: record });
     count += 1;

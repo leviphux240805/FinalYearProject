@@ -71,6 +71,13 @@ model Player {
   // Backfilled via scripts/backfillLeagueNames.js (5 requests to
   // /teams?league=X).
   leagueName   String?
+  // Player nationality (e.g. "Brazil") — API-Football's bulk /players
+  // endpoint already returns this on the same response seedTop5Free.js
+  // consumes, at no extra request cost for players seeded from now on.
+  // Existing rows seeded before this field existed are backfilled
+  // separately via scripts/backfillNationality.js (its own paginated
+  // re-fetch, since the value was never saved the first time round).
+  nationality  String?
   squadPicks   SquadPick[]
   transactions Transaction[]
   gameweekStats PlayerGameweekStat[]

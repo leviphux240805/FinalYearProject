@@ -3,6 +3,9 @@
     <!-- AUTH GATE - Shown when not logged in -->
     <AuthModal v-if="!store.isAuthenticated" />
 
+    <!-- WELCOME WALKTHROUGH - shown once, right after register() -->
+    <WelcomeModal v-if="store.isAuthenticated && store.showWelcomeModal" />
+
     <!-- MAIN CONTENT - Shown when logged in -->
     <template v-else>
       <header class="header">
@@ -128,6 +131,7 @@ import SquadPitch from './components/SquadPitch.vue';
 import GameweekFixtures from './components/GameweekFixtures.vue';
 import TransferMarket from './components/TransferMarket.vue';
 import AuthModal from './components/AuthModal.vue';
+import WelcomeModal from './components/WelcomeModal.vue';
 import PlayerComparison from './components/PlayerComparison.vue';
 import GachaPack from './components/GachaPack.vue';
 import HowToPlay from './components/HowToPlay.vue';

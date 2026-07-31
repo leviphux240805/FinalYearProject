@@ -120,6 +120,12 @@ export const globalStore = reactive({
   // ============================================================
   authToken: savedToken,
   currentUser: savedUser, // { id, username, virtualBalance, penaltyPoints }
+  // Shown once, right after register() succeeds (never after login()) — a
+  // short welcome walkthrough of the 4 main gameplay steps. Not persisted to
+  // localStorage on purpose: it's an in-memory flag for "this specific
+  // session just created the account", not a permanent "has this user ever
+  // seen onboarding" record, so it never reappears on a later login.
+  showWelcomeModal: false,
 
   get isAuthenticated() {
     return !!this.authToken && !!this.currentUser;
@@ -537,6 +543,11 @@ export const globalStore = reactive({
 
     this._setAuthSession(data.token, data.user);
     this.addToast(`Welcome to Super League, ${data.user.username}! ⚽`, 'success');
+    this.showWelcomeModal = true;
+  },
+
+  dismissWelcomeModal() {
+    this.showWelcomeModal = false;
   },
 
   async logout(silent = false) {

@@ -57,6 +57,11 @@
               {{ showPassword ? '🙈' : '👁️' }}
             </button>
           </div>
+          <ul v-if="activeTab === 'register'" class="password-rules">
+            <li v-for="rule in passwordRules" :key="rule.label" :class="{ met: rule.met }">
+              <span class="rule-icon">{{ rule.met ? '✓' : '○' }}</span>{{ rule.label }}
+            </li>
+          </ul>
         </div>
 
         <!-- Confirm Password (Register only) -->
@@ -126,10 +131,31 @@ const form = ref({
   confirmPassword: ''
 });
 
+// Mirrors fantasy-backend/routes/auth.js's passwordPolicyError() exactly, so
+// a password that looks "done" here is guaranteed to also pass the server's
+// check — the user should never fill this checklist green and then still
+// get rejected by the API on submit.
+const COMMON_WEAK_PASSWORDS = new Set([
+  'password', 'password1', '12345678', '123456789', 'qwertyui',
+  'qwerty123', '11111111', 'abc12345', 'letmein1', 'iloveyou'
+]);
+
+const passwordRules = computed(() => {
+  const pwd = form.value.password;
+  return [
+    { label: 'At least 8 characters', met: pwd.length >= 8 },
+    { label: 'One uppercase letter (A-Z)', met: /[A-Z]/.test(pwd) },
+    { label: 'One lowercase letter (a-z)', met: /[a-z]/.test(pwd) },
+    { label: 'One number (0-9)', met: /[0-9]/.test(pwd) },
+    { label: 'Not a common password', met: pwd.length > 0 && !COMMON_WEAK_PASSWORDS.has(pwd.toLowerCase()) },
+  ];
+});
+
 const isFormInvalid = computed(() => {
   if (!form.value.username || !form.value.password) return true;
   if (activeTab.value === 'register') {
-    return form.value.password !== form.value.confirmPassword;
+    if (form.value.password !== form.value.confirmPassword) return true;
+    return !passwordRules.value.every(r => r.met);
   }
   return false;
 });
@@ -310,6 +336,31 @@ async function handleSubmit() {
 }
 .toggle-pw:hover {
   opacity: 1;
+}
+.password-rules {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+.password-rules li {
+  font-size: 11px;
+  color: #6b7a8d;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.15s;
+}
+.password-rules li.met {
+  color: #2ecc71;
+}
+.rule-icon {
+  font-size: 11px;
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
 }
 
 /* Submit */
