@@ -2,17 +2,23 @@
   <div class="fixtures-wrapper">
     <div class="fixtures-header">
       <h3>📅 Fixtures</h3>
-      <select v-model.number="selectedGameweek" class="gw-select" @change="loadFixtures">
-        <option v-for="gw in gameweeks" :key="gw" :value="gw">Gameweek {{ gw }}</option>
-      </select>
+      <div class="fixtures-filters">
+        <select v-model="selectedLeague" class="gw-select">
+          <option value="all">All Leagues</option>
+          <option v-for="lg in availableLeagues" :key="lg" :value="lg">{{ lg }}</option>
+        </select>
+        <select v-model.number="selectedGameweek" class="gw-select" @change="loadFixtures">
+          <option v-for="gw in gameweeks" :key="gw" :value="gw">Gameweek {{ gw }}</option>
+        </select>
+      </div>
     </div>
 
     <div v-if="loading" class="fixtures-loading">Loading fixtures...</div>
-    <div v-else-if="fixtures.length === 0" class="fixtures-empty">
-      No fixtures scheduled for this gameweek yet.
+    <div v-else-if="filteredFixtures.length === 0" class="fixtures-empty">
+      {{ selectedLeague === 'all' ? 'No fixtures scheduled for this gameweek yet.' : `No ${selectedLeague} fixtures in this gameweek.` }}
     </div>
     <div v-else class="fixtures-list">
-      <div v-for="f in fixtures" :key="f.id" class="fixture-card">
+      <div v-for="f in filteredFixtures" :key="f.id" class="fixture-card">
         <div class="fixture-teams">
           <div class="team-block home">
             <div class="team-badge-stack">
@@ -79,7 +85,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { API_BASE } from '../store';
 import { getClubBadgeUrl } from '../clubColors';
 import { getLeagueBadgeUrl } from '../leagueBadges';
@@ -88,6 +94,12 @@ const gameweeks = ref([1]);
 const selectedGameweek = ref(1);
 const fixtures = ref([]);
 const loading = ref(false);
+
+// League filter — a fixture straddles two leagues whenever seedFixtures.js
+// pairs clubs from different competitions (see the comment on teamLeagueById
+// below), so "this league's fixtures" means "either side belongs to it",
+// not "both sides do".
+const selectedLeague = ref('all');
 
 // Fixture rows only carry teamId/teamName (see routes/fixtures.js), not
 // leagueName — and since scripts/seedFixtures.js pairs clubs across ALL 5
@@ -98,6 +110,19 @@ const loading = ref(false);
 // already uses) so each SIDE of the fixture shows its own real league badge.
 const teamLeagueById = reactive(new Map());
 const leagueOf = (teamId) => teamLeagueById.get(teamId) || null;
+
+const availableLeagues = computed(() => {
+  const set = new Set();
+  for (const lg of teamLeagueById.values()) if (lg) set.add(lg);
+  return Array.from(set).sort();
+});
+
+const filteredFixtures = computed(() => {
+  if (selectedLeague.value === 'all') return fixtures.value;
+  return fixtures.value.filter(
+    f => leagueOf(f.homeTeamId) === selectedLeague.value || leagueOf(f.awayTeamId) === selectedLeague.value
+  );
+});
 
 const brokenClubBadgeIds = reactive(new Set());
 const brokenLeagueBadgeIds = reactive(new Set());
@@ -157,8 +182,9 @@ onMounted(async () => {
   border-top: 2px solid #f7b731;
   color: white;
 }
-.fixtures-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.fixtures-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
 .fixtures-header h3 { font-size: 15px; color: #f7b731; letter-spacing: 0.3px; }
+.fixtures-filters { display: flex; gap: 8px; }
 .gw-select { background: #262f37; border: 1px solid #3c454e; border-radius: 8px; padding: 6px 10px; color: #fff; font-size: 12px; cursor: pointer; }
 
 .fixtures-loading, .fixtures-empty { font-size: 12px; color: #7f8fa6; font-style: italic; padding: 10px 0; }
@@ -172,8 +198,7 @@ onMounted(async () => {
 .team-club-badge { width: 32px; height: 32px; object-fit: contain; background: rgba(255,255,255,0.06); border-radius: 6px; padding: 2px; }
 .team-league-badge { position: absolute; bottom: -3px; right: -3px; width: 15px; height: 15px; object-fit: contain; border-radius: 3px; background: #1a2228; padding: 1px; box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
 .team-block.away .team-league-badge { right: auto; left: -3px; }
-.team-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.team-name.away { text-align: right; }
+.team-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .fixture-score { font-family: 'Courier New', monospace; font-weight: 900; color: #55efc4; padding: 0 10px; flex-shrink: 0; }
 .fixture-vs { color: #7f8fa6; font-size: 11px; padding: 0 10px; flex-shrink: 0; }
 

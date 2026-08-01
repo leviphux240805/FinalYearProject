@@ -28,8 +28,8 @@
 2. Literature Review — Background Knowledge; Related Technologies and Methodologies; Related Work / Existing Systems; Scope Compared with Similar Systems
 3. Requirement Analysis — Functional/Non-Functional Requirements; MoSCoW Prioritisation; Use Case Diagram and Specifications; Business Rules; Legal/Social/Ethical Issues
 4. Design — System Architecture; Component and Service Design; Database Design; UI Design; Algorithm Design; API and Data Flow Design; Security and Access Control Design
-5. Implementation — Development Environment; Real-Time Engine; BNPL Engine; Tactical Fit Analyzer; Real Player Data; Technical Problems and Solutions; Gameweek Summary Scoring; Squad State Gap Fix; Economic System Audit
-6. Testing and Evaluation — Testing Strategy; Concurrency Testing; Data-Layer Verification; Designed Test Plan; Performance and Load Testing; Live End-to-End Verification; Evaluation Summary
+5. Implementation — Development Environment; Real-Time Engine; BNPL Engine; Tactical Fit Analyzer; Real Player Data; Technical Problems and Solutions; Gameweek Summary Scoring; Squad State Gap Fix; Economic System Audit; Public Deployment; Real Club/League Crests and Club Roster View; Registration Security UX and Onboarding; Social Login (OAuth); Vue Template Composition Bug
+6. Testing and Evaluation — Testing Strategy; Concurrency Testing; Data-Layer Verification; Designed Test Plan; Performance and Load Testing; Live End-to-End Verification; Production Deployment Verification; Evaluation Summary
 7. Conclusion, Lessons Learned, and Future Work — Project Summary and Objective Evaluation; System Limitations; Future Work; Lessons Learned
 
 References
@@ -46,6 +46,12 @@ Appendices
 - Figure 4.1 — N-Tier System Architecture Diagram
 - Figure 4.2 — Entity Relationship Diagram
 - Figure 4.3 — UI Wireframes / Screenshots
+- Figure 4.4 — Public Deployment Topology (Vercel ↔ Render ↔ Upstash)
+- Figure 4.5 — Transfer Market with Real Club and League Crests
+- Figure 4.6 — Fixtures Page with Club and League Crests and League Filter
+- Figure 4.7 — Leagues & Clubs Page and Club Roster Panel (Photo, Name, Nationality)
+- Figure 4.8 — Registration Password Policy Checklist
+- Figure 4.9 — Welcome Onboarding Modal
 
 ---
 
@@ -62,18 +68,20 @@ Appendices
 - Table 4.2 — Core Entity Relationships
 - Table 4.3 — Application Site Map
 - Table 5.1 — Development Tooling
+- Table 5.2 — OAuth 2.0 Provider Configuration (Google, Facebook, X)
 - Table 6.1 — Concurrency Test Cases (executed, results verified)
 - Table 6.2 — Unit Test Plan
 - Table 6.3 — Integration Test Plan
 - Table 6.4 — Security Test Plan
 - Table 6.5 — Bugs Found by Live Browser-Driven Testing
+- Table 6.6 — Defects and Configuration Issues Found During Public Deployment
 - Table 7.1 — Objectives Achievement Matrix
 
 ---
 
 ### Abstract
 
-Commercial Fantasy Sports platforms typically optimise for either real-time responsiveness or financial flexibility, but rarely both, because combining the two multiplies concurrency risk. This report presents **Super League Pro**, a four-tier Fantasy Football platform that replaces HTTP polling with a WebSocket-based, room-scoped, event-driven scoring pipeline (Node.js, Express, Socket.io), and introduces a Buy Now, Pay Later (BNPL) micro-finance engine whose transactional integrity is enforced through PostgreSQL row-level locking (`SELECT ... FOR UPDATE`) inside atomic Prisma transactions. Unlike many student projects where such claims remain aspirational, this report documents an implementation that was iteratively built, connected to a real PostgreSQL instance, and *empirically verified*: a Jest/Supertest concurrency suite reproduces the double-spend race condition with locking disabled, confirms it is eliminated with locking enabled, and validates the "only one of N concurrent overdraft requests succeeds" invariant end-to-end through the live HTTP API. The report also documents a server-side Tactical Fit scoring service, room-scoped WebSocket broadcasting with webhook idempotency, and a real (not placeholder) player dataset spanning all five top European leagues, sourced after evaluating and rejecting two data providers whose free tiers proved unusable for this purpose. The result is a working MVP whose headline engineering claims — transactional integrity under concurrency and event-driven real-time delivery — are demonstrated against a live database and live API responses rather than assumed by design alone. A later iteration extended the platform with a one-shot gameweek summary scoring feature ("Chạy Matchday", Section 4.5's Algorithm 4) computed from real per-match statistics, and a full live browser-driven walkthrough of the running application — not just API-level testing — was used to find and fix five further defects, including one (an unpersisted captain selection) that would otherwise have silently broken that feature's headline scoring path.
+Commercial Fantasy Sports platforms typically optimise for either real-time responsiveness or financial flexibility, but rarely both, because combining the two multiplies concurrency risk. This report presents **Super League Pro**, a four-tier Fantasy Football platform that replaces HTTP polling with a WebSocket-based, room-scoped, event-driven scoring pipeline (Node.js, Express, Socket.io), and introduces a Buy Now, Pay Later (BNPL) micro-finance engine whose transactional integrity is enforced through PostgreSQL row-level locking (`SELECT ... FOR UPDATE`) inside atomic Prisma transactions. Unlike many student projects where such claims remain aspirational, this report documents an implementation that was iteratively built, connected to a real PostgreSQL instance, and *empirically verified*: a Jest/Supertest concurrency suite reproduces the double-spend race condition with locking disabled, confirms it is eliminated with locking enabled, and validates the "only one of N concurrent overdraft requests succeeds" invariant end-to-end through the live HTTP API. The report also documents a server-side Tactical Fit scoring service, room-scoped WebSocket broadcasting with webhook idempotency, and a real (not placeholder) player dataset spanning all five top European leagues, sourced after evaluating and rejecting two data providers whose free tiers proved unusable for this purpose. The result is a working MVP whose headline engineering claims — transactional integrity under concurrency and event-driven real-time delivery — are demonstrated against a live database and live API responses rather than assumed by design alone. A later iteration extended the platform with a one-shot gameweek summary scoring feature ("Chạy Matchday", Section 4.5's Algorithm 4) computed from real per-match statistics, and a full live browser-driven walkthrough of the running application — not just API-level testing — was used to find and fix five further defects, including one (an unpersisted captain selection) that would otherwise have silently broken that feature's headline scoring path. A final iteration moved the system from a local-only demo to a public deployment (Vercel frontend, Render backend, Upstash-managed Redis), added real club and league crest imagery, a clickable club roster view, a live password-policy checklist, an onboarding walkthrough, and delegated Google/Facebook/X login — and, consistent with this report's stated commitment to verifying against the running system rather than the design alone, that deployment phase surfaced and fixed two further production-only defects (a cross-origin session cookie misconfiguration and a Vue template composition bug that rendered the authenticated application shell to logged-out visitors), both documented in Sections 5.10–5.14 and Section 6.7 with the same evidence-first standard applied throughout this report.
 
 ### List of Abbreviations / Glossary
 
@@ -445,6 +453,32 @@ The interface follows a "data-first" design philosophy: minimise navigation dept
 
 **Figure 4.3 — UI Wireframes / Screenshots (Squad, Market, Analytics, Gacha tabs)**
 
+**Post-deployment visual identity extension.** A later iteration (Section 5.11) replaced the Transfer Market and Fixtures tabs' plain colour-coded text pills for club and league identity with real crest imagery, sourced from api-sports.io's public CDN and keyed directly by the `teamId`/league already stored on each record, at no additional API cost. The Transfer Market's player row was simultaneously redesigned — the low-information "Form" column was removed in favour of a larger player photo and larger club/league badges, based on the concrete observation that badge recognisability mattered more to a user scanning the market than a compressed win/draw/loss glyph. A new Leagues & Clubs tab (`LeaguesInfo.vue`) was also added, listing every club grouped by league with its crest, and made clickable: selecting a club opens a roster panel showing that club's players by photo, full name, and nationality only — a deliberate scope decision (Section 5.11) to keep that page a pure identity/reference view rather than duplicating the Transfer Market's price/stat data.
+
+*(Insert screenshot: public deployment topology / architecture note — Vercel frontend calling the Render backend over HTTPS, Render backend talking to its managed PostgreSQL and to Upstash Redis over TLS)*
+
+**Figure 4.4 — Public Deployment Topology (Vercel ↔ Render ↔ Upstash)**
+
+*(Insert screenshot: Transfer Market tab showing player photo, club crest, and league crest for several rows)*
+
+**Figure 4.5 — Transfer Market with Real Club and League Crests**
+
+*(Insert screenshot: Fixtures tab showing both teams' crests per fixture and the new League filter dropdown next to the Gameweek dropdown)*
+
+**Figure 4.6 — Fixtures Page with Club and League Crests and League Filter**
+
+*(Insert screenshot: Leagues & Clubs tab with a club's roster panel open, showing player photos, names, and nationalities)*
+
+**Figure 4.7 — Leagues & Clubs Page and Club Roster Panel (Photo, Name, Nationality)**
+
+*(Insert screenshot: registration form with the live password-policy checklist visible, showing a mix of met (✓) and unmet (○) rules)*
+
+**Figure 4.8 — Registration Password Policy Checklist**
+
+*(Insert screenshot: the animated Welcome Modal shown immediately after a successful registration)*
+
+**Figure 4.9 — Welcome Onboarding Modal**
+
 ## 4.5 Algorithm Design
 
 **Algorithm 1 — BNPL Transfer Execution (as actually implemented).** The pseudocode below reflects the implementation in `services/transferService.js`, which generalises the original design (Section 3.5, UC-01) in two ways born out of implementation reality: `playerToSellId` is optional (most purchases in the actual UI are additive squad-building against budget, not a forced swap), and a club-ownership precondition is enforced before the financial computation.
@@ -567,9 +601,12 @@ The real-time data flow (Section 3.5, UC-02) is: webhook POST → `eventId` dedu
 
 - **Authentication.** JWTs are signed with a server-held secret; the `authenticateToken` middleware rejects missing, expired, or forged tokens before a request reaches business logic. The token itself expires after 1 day (`JWT_EXPIRES_IN`, `routes/auth.js`), acting only as a safety ceiling — the actual session policy is enforced client-side (`super-league-fantasy/src/store.js`): closing or backgrounding the tab records a timestamp, and reopening more than 30 minutes after that timestamp clears the cached session and forces re-authentication, while a tab left open and active is never force-logged-out mid-session. This two-layer design was chosen so a determined client could not extend their own session past the 30-minute policy by tampering with `localStorage`, without also making the 1-day JWT itself the primary expiry mechanism (which would log out an actively-playing user mid-session).
 - **Authorisation.** Every financial or squad-mutating endpoint re-derives the user's balance and squad state from the database inside the same transaction that performs the mutation — the server never trusts a balance or price supplied by the client. This is enforced concretely, not just as a design intention: the frontend's `buyPlayer`/`sellPlayer` methods (Section 5.2) only ever assign `store.budget` from the server's HTTP response.
-- **Input validation.** Registration enforces username character-set and length constraints and an 8-character password minimum; login uses a constant-time dummy `bcrypt.compare` against non-existent usernames to resist username-enumeration timing attacks.
+- **Password storage.** Passwords are never stored or logged in plaintext. `routes/auth.js` hashes with `bcrypt` at a cost factor of 12 before the value ever reaches PostgreSQL, and `User.passwordHash` is nullable specifically so an OAuth-only account (Section 5.13) has no password field to leak in the first place, rather than storing an unusable placeholder value. "Hashed" and "encrypted" are deliberately treated as distinct in this project: a hash is one-way (there is no decrypt operation, by design), which is the correct property for credential storage.
+- **Input validation.** Registration enforces username character-set and length constraints; the password policy was strengthened in a later iteration from a bare 8-character minimum to also require at least one uppercase letter, one lowercase letter, one digit, and rejection of a small deny-list of common weak passwords (`password123`, `qwerty123`, etc.) — enforced identically on both sides: `routes/auth.js`'s `passwordPolicyError()` is the authoritative check, and `AuthModal.vue` mirrors the exact same five rules as a live, per-keystroke checklist (Figure 4.8) so a user is never shown an all-green client-side state that the server would still reject. Login uses a constant-time dummy `bcrypt.compare` against non-existent usernames to resist username-enumeration timing attacks.
+- **Delegated authentication (OAuth 2.0 + PKCE).** Google, Facebook, and X login (Section 5.13) use the Authorization Code flow with PKCE and a single-use, TTL-bound CSRF `state` value, so no third-party password is ever handled or stored by this application. Each provider identity is deliberately kept as its own `User` row, keyed by that provider's stable ID, rather than auto-linked to an existing local account sharing the same email — an explicit choice to avoid an account-takeover path via a spoofed or reused email address on a different provider.
+- **Cross-origin session cookie configuration.** The refresh-token cookie is `httpOnly` (inaccessible to page JavaScript, mitigating XSS-driven token theft) and, in production, set with `secure: true` and `sameSite: 'none'` (Section 5.10) — a requirement specific to this project's deployment topology, since the Vercel frontend and Render backend are different origins and a stricter `sameSite` value would silently prevent the cookie from ever being sent.
 - **SQL injection.** Structurally prevented by Prisma's parameterised query generation; the one raw SQL statement in the codebase (the `FOR UPDATE` lock query in `transferService.js`) uses Prisma's tagged-template `$queryRaw`, which parameterises interpolated values rather than string-concatenating them.
-- **Least privilege.** The database role used by the running application does not need schema-alteration privileges at runtime in a production deployment; migrations should run under a separate, more privileged role never exposed to the application process (this project's local development setup uses a single superuser role for convenience, which is explicitly flagged as unsuitable for production in Section 7.2).
+- **Least privilege.** The database role used by the running application does not need schema-alteration privileges at runtime in a production deployment; migrations should run under a separate, more privileged role never exposed to the application process (this project's local development setup, and its current Render deployment, both use a single role for convenience, which is explicitly flagged as unsuitable for a production system handling real funds in Section 7.2).
 
 ---
 
@@ -710,6 +747,148 @@ Two independent user-facing reports of incorrect wallet balances during this imp
 
 **Bug 5 — a misleading rejection message masking the real cause.** Distinct from the above server-side bugs, `TransferMarket.vue`'s client-side purchase handler determined *which* error message to show a user by inspecting only the user's budget shortfall — if the shortfall exceeded the BNPL cap, it always displayed "BNPL only allows loans up to $2.0M" and never actually contacted the backend, even when the true rejection reason (discovered live, Section 6.7) was a club or position limit that would have applied regardless of budget. The fix removed the client-side guess for that branch and delegated to the same `store.buyPlayer()` call the normal-affordability path already used, so the toast shown to the user always reflects the backend's actual, authoritative rejection reason rather than a client-side inference that happened to be wrong whenever more than one constraint was violated at once.
 
+## 5.10 Public Deployment — Render, Vercel, and Upstash Redis
+
+Every section up to this point describes a system verified against `localhost`. A final implementation pass moved Super League Pro to a public deployment, on the reasoning that a fantasy-sports platform's real-time and financial claims (Sections 5.2–5.3) are only fully meaningful once demonstrated across the network topology a real user would actually experience — separate origins, a managed database, and a managed Redis instance, rather than three processes on one machine trusting one shared `localhost`.
+
+**Topology.** The Vue frontend (`super-league-fantasy`) is built and served as a static Vite bundle on Vercel; the Express/Socket.io backend (`fantasy-backend`) runs as a Render Web Service alongside a Render-managed PostgreSQL instance; Redis is provided by Upstash (a free-tier managed Redis reachable only over TLS, i.e. `rediss://`, not the plain `redis://` scheme `redisClient` had only ever been exercised against locally). A `render.yaml` Blueprint declares both the web service and the database together, wiring `DATABASE_URL` automatically via Prisma's `fromDatabase` reference rather than requiring it to be copied by hand, and every remaining secret (`JWT_SECRET`, `JWT_REFRESH_SECRET`, `REDIS_URL`, `FRONTEND_ORIGIN`) is declared with `sync: false` so it is entered once directly in the Render dashboard rather than committed to the repository. `server.js` gained `app.set('trust proxy', 1)` so `req.protocol` reports correctly behind Render's TLS-terminating reverse proxy, and a `GET /health` endpoint that checks both `prisma.$queryRaw\`SELECT 1\`` and `redisClient.isReady`, wired as the Blueprint's health-check path so Render only routes traffic to an instance that can actually reach both of its dependencies.
+
+**A genuine pre-existing bug, found before it could affect a real user.** Reviewing the authentication path specifically for cross-origin correctness (rather than assuming code that worked on `localhost` would keep working once frontend and backend were different origins) surfaced that `tokenService.js`'s refresh-token cookie was hardcoded to `sameSite: 'strict'`:
+
+```js
+function refreshCookieOptions() {
+  const isProd = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    maxAge: REFRESH_TOKEN_MAX_AGE_MS,
+    path: '/api/auth'
+  };
+}
+```
+
+A `sameSite: 'strict'` cookie is never sent on a cross-site request under any circumstance — meaning the moment the frontend and backend stopped sharing an origin, every `/api/auth/refresh` call would have silently failed to include the refresh token, breaking session persistence for every user, with no error message pointing at the cause (the request would simply look like an unauthenticated one). This was corrected to `sameSite: 'none'` (which requires `secure: true`, itself gated on `NODE_ENV === 'production'` so local HTTP development is unaffected) before the first real deployment, rather than being discovered later as a user-facing symptom — it is recorded here in the same evidence-first spirit as the rest of this report specifically *because* it was caught by deliberate review of a known cross-origin failure mode, not by accident.
+
+**Two further deployment-specific gotchas, both operational rather than code defects, are recorded because they cost real debugging time and generalise beyond this project.** First, Vite inlines `import.meta.env.VITE_API_BASE` at *build* time, not at runtime — changing its value in the Vercel dashboard has no effect on an already-built bundle and requires a genuinely new deployment (a "Redeploy" of an old build reuses that build's already-inlined value). Second, Vercel's per-deployment preview URLs (containing a random hash, e.g. `...-rg4b1ibgr-....vercel.app`) are distinct from the stable Production domain shown under the project's Domains tab; `FRONTEND_ORIGIN` on the backend must match the latter, and using the former — an easy mistake, since both look like valid HTTPS URLs for the same site — produces a CORS rejection whose browser-console message correctly names the mismatched origin but gives no hint that a *different, stable* URL was the one actually expected.
+
+**Data migration without re-spending a rate-limited quota.** Section 5.5.3's real player dataset was already seeded into the local PostgreSQL instance; re-running `seedTop5Free.js` against the new, empty Render database would have re-consumed API-Football's 100-requests/day free-tier quota for no benefit, since the data itself had not changed. Instead, `pg_dump --data-only --column-inserts` exported the existing local rows as portable `INSERT` statements, and `psql -f` replayed them directly against the Render database's connection string — a few minutes of work in place of the multi-day re-seed the original ingestion required.
+
+## 5.11 Real Club and League Crests — Market, Fixtures, and Leagues & Clubs Redesign
+
+The Transfer Market and Fixtures tabs originally represented a player's or fixture's club and league with plain coloured text pills (e.g. a solid-colour "ARS" badge), generated client-side from a hand-maintained colour lookup table. Stakeholder feedback requested real crest imagery instead. Rather than adding a new backend field or a fourth data-provider integration, this was solved by exploiting a property of the provider already in use: api-sports.io serves club and league crests at predictable, public CDN paths keyed by the same numeric IDs the dataset already stores —
+
+```js
+export function getClubBadgeUrl(teamId) {
+  return teamId ? `https://media.api-sports.io/football/teams/${teamId}.png` : null;
+}
+export function getLeagueBadgeUrl(leagueName) {
+  const id = LEAGUE_IDS[leagueName]; // the 5 hardcoded top-league IDs
+  return id ? `https://media.api-sports.io/football/leagues/${id}.png` : null;
+}
+```
+
+— meaning every crest renders directly from `Player.teamId` (already present on every seeded row, Section 4.3) with zero additional API requests and zero new database columns, sidestepping the exact rate-limit ceiling that constrained Section 5.5.3. Because a numeric ID has no contractual guarantee that a crest image exists behind it, every badge is wrapped in the same defensive pattern: a reactive `Set` of ids whose image previously 404'd, populated by an `@error` handler, and a `v-if` guard so a missing crest silently falls back (to a position badge for players, an initial-letter circle for clubs) rather than rendering a broken-image icon — reused identically across `TransferMarket.vue`, `GameweekFixtures.vue`, and `LeaguesInfo.vue`.
+
+**Transfer Market.** The player row was redesigned alongside the badge addition: the "Form" column (a compressed W/D/L dot sequence) was removed, and the freed width went to a larger player photo and larger club/league badges — a deliberate trade-off, since the badges make a player's club instantly recognisable at a glance in a way the form column did not, and stakeholder feedback specifically asked for player and club identity over the form indicator.
+
+**Fixtures.** Both teams in a fixture now show their club crest with their league crest overlaid as a small corner badge — necessary because `scripts/seedFixtures.js` pairs clubs for a mock schedule across *all five* leagues rather than within a single league (Section 4.5's mock-data rationale), so a single fixture can genuinely be, for example, SC Freiburg (Bundesliga) vs. Arsenal (Premier League), and each side needs its own league identity shown independently. A League filter dropdown was added next to the existing Gameweek dropdown, built from the same `teamId → leagueName` lookup already fetched for the badges; because fixtures can straddle two leagues, "filter by league" is defined as *either* side belonging to the selected league, not both, and this distinction is stated explicitly in the UI copy rather than left for a user to discover by trial and error.
+
+**Leagues & Clubs and player nationality.** A new tab groups every seeded club under its league, each with its crest, and each club card is now clickable, opening a roster panel that lists that club's players by photo, full name, and nationality — deliberately excluding price, position, and stats, since stakeholder feedback specified this page as a pure club-identity reference rather than a second Transfer Market. Building this exposed a genuine data gap: `Player.nationality` did not exist as a column at all, even though API-Football's bulk `/players` endpoint (already the source for every other seeded field, Section 5.5.3) returns it on the exact same response `seedTop5Free.js` was already consuming — the field was simply never read. A migration added the nullable column, and `seedTop5Free.js` was updated to capture it going forward at no extra request cost. Retroactively populating it for the 357 players already seeded before the column existed is a separate concern, since nationality is only present on the `/players` response, not the lighter `/teams` endpoint the roster grouping itself uses — `scripts/backfillNationality.js` re-walks the same paginated `/players?league={id}&page={n}` calls as the original seed, subject to the same free-tier constraints documented in Section 5.5.3 (a hard page-3 ceiling per league, a 100-requests/day cap), meaning a full backfill takes the same multi-day, resumable-checkpoint pattern as the original dataset ingestion. Players not yet backfilled display "Nationality unknown" in the roster panel rather than a blank or broken field.
+
+## 5.12 Registration Security UX and Onboarding
+
+Two related but distinct UX gaps were closed once the underlying account-security work (bcrypt hashing, Section 4.7) was already in place but not visibly communicated to a user at the point they most needed it.
+
+**Live password-policy checklist.** The registration form previously gave no indication of what makes a valid password beyond a generic server-side rejection after submission. `AuthModal.vue` gained a `passwordRules` computed property that duplicates the server's `passwordPolicyError()` rules from `routes/auth.js` exactly — length ≥ 8, at least one uppercase letter, one lowercase letter, one digit, and not a member of a small common-weak-password deny-list — rendered as a live per-keystroke checklist (✓/○ per rule, Figure 4.8) rather than a single pass/fail message:
+
+```js
+// AuthModal.vue — mirrors routes/auth.js's passwordPolicyError() exactly, so
+// a password that looks "done" here is guaranteed to also pass the server's
+// check — the user should never fill this checklist green and then still
+// get rejected by the API on submit.
+const passwordRules = computed(() => {
+  const pwd = form.value.password;
+  return [
+    { label: 'At least 8 characters', met: pwd.length >= 8 },
+    { label: 'One uppercase letter (A-Z)', met: /[A-Z]/.test(pwd) },
+    { label: 'One lowercase letter (a-z)', met: /[a-z]/.test(pwd) },
+    { label: 'One number (0-9)', met: /[0-9]/.test(pwd) },
+    { label: 'Not a common password', met: pwd.length > 0 && !COMMON_WEAK_PASSWORDS.has(pwd.toLowerCase()) },
+  ];
+});
+```
+
+`isFormInvalid` additionally requires `passwordRules.value.every(r => r.met)` on the register tab, so the submit button itself stays disabled until every rule is satisfied — a second layer on top of the visual checklist, not a replacement for the server-side check, which remains authoritative. Keeping the two rule sets in exact correspondence was a deliberate implementation concern: a checklist that goes all-green on a password the server would still reject is worse than no checklist at all, since it actively misleads the user at the exact moment they are deciding the submission is ready.
+
+**Welcome onboarding modal.** A newly registered account was previously dropped straight into the main application with no orientation. `WelcomeModal.vue` is a four-step animated carousel (Build Squad → Transfer Market → Captain & Vice-Captain → Run Matchday) shown once, immediately after a successful `register()` call — never after `login()`, so a returning user is never re-shown onboarding they have already seen — and is non-blocking: it can be dismissed or stepped through at the user's own pace rather than gating access to the rest of the interface behind forced completion, a deliberate choice among three onboarding design options considered (a forced tutorial flow and a redirect-to-guide page being the two rejected alternatives) on the basis that a skippable walkthrough respects a user who already understands fantasy-sports conventions while still orienting one who does not.
+
+## 5.13 Social Login — OAuth 2.0 Authorization Code Flow with PKCE
+
+"Continue with Google / Facebook / X" was implemented as one generic OAuth 2.0 Authorization Code (+ PKCE) handler (`routes/oauth.js`) parameterised by a small per-provider configuration object (`services/oauthProviders.js`), rather than three independently hand-written flows, since the redirect → token-exchange → profile-fetch shape is identical across providers and only the URLs and profile-response field names differ.
+
+**Table 5.2 — OAuth 2.0 Provider Configuration**
+
+| Provider | Client ID Env | Token Auth Style | PKCE | Notes |
+|----------|---------------|-------------------|------|-------|
+| Google | `GOOGLE_CLIENT_ID` | Body | Yes | Profile via `openidconnect.googleapis.com/v1/userinfo` |
+| Facebook | `FACEBOOK_APP_ID` | Body | No | Facebook's OAuth 2.0 implementation does not support PKCE |
+| X (Twitter) | `TWITTER_CLIENT_ID` | HTTP Basic | Yes (mandatory) | Requires the OAuth 2.0 Client ID/Secret, distinct from the legacy OAuth 1.0a API Key/Secret pair the same developer portal also issues |
+
+**Flow.** `GET /api/auth/:provider` generates a single-use, TTL-bound (10-minute) CSRF `state` value and, for PKCE-capable providers, a `code_verifier`/`code_challenge` pair, stores the pending pair server-side in an in-memory map keyed by `state`, and redirects the browser to the provider's own consent screen — this is a real browser navigation, not an XHR call, because the user must authenticate on the provider's own domain:
+
+```js
+// routes/oauth.js — GET /api/auth/:provider
+const clientId = process.env[provider.clientIdEnv];
+if (!clientId) {
+  return res.status(503).json({ success: false, error: `${provider.label} login is not configured on this server yet.` });
+}
+
+const state = crypto.randomBytes(24).toString('hex');
+const codeVerifier = base64url(crypto.randomBytes(32));
+pendingOAuthStates.set(state, { provider: providerName, codeVerifier, createdAt: Date.now() });
+
+const params = new URLSearchParams({
+  client_id: clientId,
+  redirect_uri: callbackUrlFor(req, providerName),
+  response_type: 'code',
+  scope: provider.scope,
+  state
+});
+
+if (provider.usesPkce) {
+  const codeChallenge = base64url(crypto.createHash('sha256').update(codeVerifier).digest());
+  params.set('code_challenge', codeChallenge);
+  params.set('code_challenge_method', 'S256');
+}
+
+res.redirect(`${provider.authorizeUrl}?${params.toString()}`);
+```
+
+The `codeVerifier` is never sent to the provider at this stage — only its SHA-256 hash (`code_challenge`) is — and is only revealed in the later token-exchange request, which is what makes PKCE effective against an authorization-code-interception attack even without a client secret (relevant for a public client, though this project's server-side exchange also uses a confidential client secret as a second layer). `GET /api/auth/:provider/callback` receives the provider's redirect back, validates `state` against the stored pending entry (rejecting replay or forgery, and deleting it immediately so it is single-use), exchanges the authorization `code` plus the original `codeVerifier` for an access token, fetches the provider's profile endpoint, and either creates a new `User` row (keyed by that provider's stable ID in a dedicated column — `googleId`, `facebookId`, or `twitterId`, Section 4.7) or logs into the existing one. The resulting session is issued through the exact same `tokenService.js` mechanism as a password login (Section 4.7), so no other part of the application can distinguish an OAuth session from a password one.
+
+**Configuration is checked, not assumed.** `GET /api/auth/:provider` explicitly checks `process.env[provider.clientIdEnv]` before attempting any redirect, and returns a clear `503 { error: "<Provider> login is not configured on this server yet." }` if the corresponding client ID has not been set — a deliberate design choice so an unconfigured provider fails loudly and specifically rather than redirecting into a broken flow or crashing. At the time of this report, real client ID/secret pairs had not yet been registered with all three providers (each requires its own developer-portal application, and Facebook and X additionally gate live login behind an app-review or Live-mode step, Section 7.2), so the full provider redirect round-trip is recorded as a remaining verification item rather than claimed as live-tested (Section 6.7).
+
+## 5.14 A Template Composition Bug: Vue's `v-else` Binds to the Nearest `v-if` Sibling
+
+This section documents a defect found via a live production bug report, not discovered by code review, and is recorded because its root cause is a general Vue templating hazard rather than a mistake specific to this project's business logic.
+
+**The bug.** `App.vue`'s root template originally read:
+
+```html
+<AuthModal v-if="!store.isAuthenticated" />
+<WelcomeModal v-if="store.isAuthenticated && store.showWelcomeModal" />
+<template v-else>
+  <!-- main authenticated application shell -->
+</template>
+```
+
+Vue's compiler binds a `v-else` block to the *nearest preceding sibling element carrying `v-if` or `v-else-if`* — not to whichever `v-if` a reader might intend by visual proximity or intention. Here, that nearest sibling was `WelcomeModal`'s own `v-if`, not `AuthModal`'s. For a logged-out visitor, `store.isAuthenticated` is `false`, so `WelcomeModal`'s `v-if` condition (`isAuthenticated && showWelcomeModal`) is also `false` — which meant the `v-else` block (the entire main application shell) evaluated to `true` and rendered *in addition to* `AuthModal`, not instead of it. The shell's header immediately reads `store.currentUser.username`, and `store.currentUser` is `null` before login, producing `TypeError: Cannot read properties of null (reading 'username')` at mount — a fully blank page for every unauthenticated visitor, which is to say every first-time visitor to the public deployment.
+
+**How it was found.** A user report of "the site shows nothing" was diagnosed by first ruling out a build/deploy failure (checking the dev server's terminal output), then reproducing it directly in a browser and reading the DevTools Console, whose stack trace named the exact property access and pinpointed `mount` as the failing phase — consistent with this report's stated preference (Section 6.6) for live, browser-driven diagnosis over guessing from source code alone when a defect's actual trigger condition (here, being logged out) was not the one most recently tested.
+
+**The fix.** `WelcomeModal` was moved out of the `v-if`/`v-else` chain entirely, repositioned as an independent sibling rendered after the main `<template v-else>` block, with its own unrelated `v-if="store.isAuthenticated && store.showWelcomeModal"` condition — restoring `AuthModal`'s `v-if` and the shell's `template v-else` as an uninterrupted adjacent pair, and keeping `WelcomeModal`'s behaviour (an overlay shown only post-registration) unchanged. The general lesson — inserting *any* new `v-if` element between an existing `v-if`/`v-else` pair silently re-pairs the `v-else` to the new element instead — is carried forward to Section 7.4.
+
 ---
 
 # 6. Testing and Evaluation
@@ -804,9 +983,26 @@ Each row was reproduced live, the corresponding code fix applied, and then re-ve
 
 **Confirmatory run.** After all five issues were addressed, a full walkthrough was repeated end-to-end on a freshly registered account: registration → an eleven-player squad built from real, gameweek-seeded Premier League players → a deliberately triggered club-limit rejection (attempting a fourth Arsenal player) → a deliberately triggered position-limit rejection (a sixth midfielder) → a BNPL loan correctly triggered and confirmed for a sub-$2.0M shortfall → a deliberately triggered insufficient-funds rejection for a shortfall above the BNPL cap, showing the server's exact computed figure → a player sale at the correct 90% resale rate → captain selection persisted correctly on retry → the Player Comparison and Gacha tabs confirmed to render without error → "Chạy Matchday" executed successfully, returning a **total of 69 points**, with the captained forward (Erling Haaland: 1 goal, clean sheet, ≥60 minutes) correctly scoring `(1+1) + (1×4) + 4 = 10`, doubled to `20` for the captaincy multiplier, exactly matching Algorithm 4's specification (Section 4.5) — and finally `GET /api/leaderboard` confirmed the same account ranked first in the Redis-backed global leaderboard with that score.
 
-## 6.7 Evaluation Summary
+## 6.7 Production Deployment Verification
 
-The system's single most important correctness claim — that row-level locking makes BNPL double-spending structurally impossible rather than merely unlikely — is the one claim in this report backed by a reproducible, currently-passing automated test against a real database, including a deliberate demonstration of the failure mode it prevents. Data-layer claims (real player counts, tactical-fit scores) were spot-verified manually against the live API. The gameweek summary scoring extension (Algorithm 4, Section 5.7) and the server-authoritative squad-state fixes it exposed (Sections 5.8–5.9) were verified by a full live browser-driven walkthrough (Section 6.6) rather than API-level testing alone, precisely because the defects that mattered most there were integration gaps between client and server state, not defects isolable to either layer. Broader unit, integration, security, and performance coverage exists as a documented test plan rather than as executed and verified results, and is reported as such rather than inflated.
+Sections 6.2–6.6 verify the system as run locally. This section documents verification specific to the public deployment (Section 5.10): defects that only exist, or only became visible, once the frontend and backend were genuinely separate origins talking over the public internet rather than processes sharing `localhost`.
+
+**Table 6.6 — Defects and Configuration Issues Found During Public Deployment**
+
+| # | Symptom | Root cause | Section | Found by |
+|---|---------|------------|---------|----------|
+| 1 | (Pre-empted before any user was affected) — would have manifested as silent, permanent session-refresh failure for every user | `tokenService.js`'s refresh cookie was hardcoded `sameSite: 'strict'`, which is never sent cross-site | 5.10 | Deliberate review of the auth path for cross-origin correctness ahead of launch |
+| 2 | Registration failed with a generic "Failed to fetch" in the browser | `FRONTEND_ORIGIN` on the backend was set to a Vercel *preview* deployment URL (containing a random hash) rather than the stable Production domain | 5.10 | Live testing; confirmed via the exact origin named in the browser's CORS console error |
+| 3 | Redis reported `WRONGPASS invalid username-password pair`, then `Socket closed unexpectedly` | A rotated Upstash password, then a `redis://` connection string used where TLS-only Upstash requires `rediss://` | 5.10 | Live testing against the deployed backend's own error logging |
+| 4 | The entire application rendered a blank white page for a logged-out visitor | `WelcomeModal`'s `v-if` silently became the sibling `v-else` bound to, breaking the intended `AuthModal`/main-shell pairing (Section 5.14) | 5.14 | User bug report, reproduced live, root-caused via the browser DevTools Console stack trace |
+
+Row 1 is included even though no user was ever actually affected by it, for the same reason Table 6.5 records a data-pipeline issue rather than only application bugs: from a verification standpoint, a defect caught by deliberate pre-launch review is still evidence that the review process itself works, and omitting it would understate how the cross-origin cookie requirement was actually discovered and addressed. Rows 2–3 are operational/configuration issues rather than application code defects, but are recorded in the same table as Row 4 (a genuine code defect) because, consistent with Section 5.6's treatment of the local-database-misconfiguration problem, this report's position is that a configuration failure that blocks the running system is worth documenting with the same rigour as a code bug, not silently excluded for being "merely" operational.
+
+**What was, and was not, verified live.** The four rows above were each reproduced against the actual deployed system and confirmed fixed by re-testing the same failure path afterward — the sameSite cookie fix by exercising a full cross-origin login → refresh cycle after deployment; the CORS fix by re-attempting registration from the stable Production domain; the Redis fix by observing the backend's own startup log report a successful connection; and the blank-page fix by reloading the deployed frontend as a logged-out visitor and confirming both the auth screen and, separately, the authenticated shell after logging in, each render without error. The real club/league crest badges (Section 5.11) were confirmed rendering correctly for the large majority of clubs via direct visual inspection of the live Transfer Market, Fixtures, and Leagues & Clubs pages, with the documented exception of a small number of clubs whose crest is not present at api-sports.io's CDN path, correctly falling back to the initial-letter placeholder rather than a broken image. Not yet live-verified: the OAuth login round-trip (Section 5.13), since real provider client credentials had not yet been registered with Google, Facebook, or X at the time of this report — the server's own configuration check (returning a clear 503 rather than attempting a broken redirect) was confirmed to behave correctly in this not-yet-configured state, which is the one part of that feature currently checkable; and the nationality backfill (Section 5.11), which is a data-completeness item rather than a code-correctness one and is explicitly still in progress.
+
+## 6.8 Evaluation Summary
+
+The system's single most important correctness claim — that row-level locking makes BNPL double-spending structurally impossible rather than merely unlikely — is the one claim in this report backed by a reproducible, currently-passing automated test against a real database, including a deliberate demonstration of the failure mode it prevents. Data-layer claims (real player counts, tactical-fit scores) were spot-verified manually against the live API. The gameweek summary scoring extension (Algorithm 4, Section 5.7) and the server-authoritative squad-state fixes it exposed (Sections 5.8–5.9) were verified by a full live browser-driven walkthrough (Section 6.6) rather than API-level testing alone, precisely because the defects that mattered most there were integration gaps between client and server state, not defects isolable to either layer. The public deployment phase (Section 6.7) extended this same evidence-first standard beyond `localhost`, catching one defect before launch and one after, both fixed and re-verified against the live system rather than reasoned about in the abstract. Broader unit, integration, security, and performance coverage exists as a documented test plan rather than as executed and verified results, and is reported as such rather than inflated.
 
 ---
 
@@ -825,6 +1021,7 @@ The system's single most important correctness claim — that row-level locking 
 | OBJ-05 | Performance leaderboard | Achieved by design | Redis ZSET O(log N) operations; not benchmarked at scale in this pass |
 | OBJ-06 | Real player data | **Achieved, with documented limits** | 357 real players across all 5 top leagues, verified live (Section 5.5); not full squad depth |
 | OBJ-07 *(added post-elicitation)* | Gameweek summary scoring | **Empirically verified** | Algorithm 4 (Section 4.5, 5.7) implemented and live-verified end-to-end (Section 6.6): a real 11-player squad scored a total of 69 points from seeded Matchweek 1 data, with the captaincy multiplier confirmed exact against hand-calculation |
+| OBJ-08 *(added post-elicitation)* | Public deployment | **Achieved, with defects found and fixed post-launch** | Vercel + Render + Upstash deployment live (Section 5.10); one pre-existing defect (cross-origin session cookie) caught before launch and one (a Vue template composition bug) caught by a live user report after launch, both fixed and re-verified against the deployed system (Sections 5.10, 5.14, 6.7) |
 
 ## 7.2 System Limitations
 
@@ -837,6 +1034,11 @@ The system's single most important correctness claim — that row-level locking 
 7. **Bench players never score.** Algorithm 4 (Section 4.5) awards points only to a squad's eleven starters; the MVP has no auto-substitution logic, so an unused bench player scores zero regardless of their real-world match performance — a deliberate scope simplification for this pass, not an oversight, but one that would need addressing before the feature could be considered feature-complete against how commercial fantasy platforms actually operate.
 8. **Missing match-statistics data fails silently, not loudly.** `matchdayService.runMatchday` (Section 5.7) substitutes an all-zero stat line for any starter with no corresponding `PlayerGameweekStat` row for the target gameweek, rather than rejecting the run or flagging the player as unscored. This was the direct cause of Row 5 in Table 6.5 (a full squad scoring zero because the seed script had not yet been run) and, while defensible as a way to let a gameweek run complete even with partial data coverage, means a genuine data-coverage gap and a genuine zero-point performance are currently indistinguishable to the end user.
 9. **Gameweek summary scoring is single-gameweek only.** Consistent with the rest of the application (Section 3.6), there is no gameweek-switching UI; `runMatchday` always targets gameweek 1 unless called with an explicit parameter that no client-side control currently exposes.
+10. **Player nationality is incomplete for players seeded before the field existed.** Of 357 real players, only those seeded after `seedTop5Free.js`'s nationality capture was added (Section 5.11) have the field populated; the remaining players display "Nationality unknown" in the Leagues & Clubs roster panel until `scripts/backfillNationality.js` completes its multi-day, rate-limited re-fetch (Section 5.11).
+11. **Fixtures are mock and cross-league by construction.** `scripts/seedFixtures.js` pairs clubs for a mock schedule irrespective of league (Section 5.11), so no real fixture in the app is guaranteed to have both teams in the same competition; the Fixtures page's League filter is consequently defined as "either side belongs to this league," a weaker guarantee than a real single-league fixture list would provide.
+12. **Social login is implemented but not yet live-tested end-to-end.** Google, Facebook, and X login (Section 5.13) are fully implemented, including a correct "not configured" failure mode, but real provider credentials had not been registered by any of the three platforms at the time of this report, so the actual provider redirect → callback → account-creation round-trip remains unverified against a live provider (Section 6.7).
+13. **Free-tier hosting introduces cold starts and no horizontal scale.** The Render backend sleeps after 15 minutes of inactivity on its free tier, adding roughly 30–60 seconds to the first request after idle — a real user-facing latency characteristic of the current deployment, distinct from the WebSocket-delivery latency NFR-01 is actually concerned with, but worth stating plainly since a live demo immediately after a period of inactivity will visibly exhibit it.
+14. **No automated deployment gate.** Deploys to Render and Vercel are triggered automatically by a `git push` to the repository's default branch (via each platform's GitHub webhook), with no CI step that runs the Chapter 6 test suite before a deploy is allowed to proceed — meaning a regression in `tests/bnpl.concurrency.test.js` would not currently block a bad deploy from reaching the public URL.
 
 ## 7.3 Future Work
 
@@ -849,6 +1051,11 @@ The system's single most important correctness claim — that row-level locking 
 7. **Bench auto-substitution for Algorithm 4**, so a non-playing starter can be automatically replaced by an eligible bench player before gameweek scoring runs, addressing Limitation 7 (Section 7.2).
 8. **Distinguish "genuinely zero points" from "no match data available"** in the gameweek summary scoring result (`matchdayService.runMatchday`, Section 5.7), addressing Limitation 8 (Section 7.2) — for example by surfacing the existing `hasMatchData` flag the service already computes internally but does not yet expose to the client.
 9. **Server-side minimum-formation validation** (e.g. requiring at least three defenders in the starting eleven) before a squad can be locked in for gameweek scoring, closing the remaining part of Limitation 3 (Section 7.2).
+10. **Register real OAuth credentials with Google, Facebook, and X** and complete a live end-to-end verification of the social-login round-trip, closing Limitation 12 (Section 7.2).
+11. **Run `scripts/backfillNationality.js` to completion** across all five leagues, closing Limitation 10 (Section 7.2).
+12. **Replace the mock, cross-league fixture generator with a real fixture-provider integration** once the real season resumes (both football-data.org and API-Football expose fixtures endpoints, and both tokens are already configured, Section 5.5), closing Limitation 11 (Section 7.2).
+13. **Add a CI test gate before deploy**, so `tests/bnpl.concurrency.test.js` must pass before Render/Vercel's auto-deploy webhooks are allowed to publish a new build, closing Limitation 14 (Section 7.2).
+14. **Move off free-tier hosting for any real demo or user-facing use**, removing the Render cold-start characteristic documented in Limitation 13 (Section 7.2).
 
 ## 7.4 Lessons Learned
 
@@ -862,6 +1069,9 @@ This section records what was actually learned in the process of closing the gap
 - **A UI that "looks" correct is not the same claim as a UI that "is" correct.** The captain-persistence defect (Section 5.8) is the clearest example in this project of a bug that was completely invisible from the client alone: the armband badge rendered, the success toast fired, and nothing about the interface suggested anything was wrong. It only became visible by tracing the exact database column the next stage of the pipeline (`matchdayService.runMatchday`) actually read from, and confirming nothing had ever written to it — a reminder that "the UI updated" and "the server persisted it" are two separate claims, and a project that has stated its own principle as "the server never trusts the client" (Section 4.7) should periodically audit whether every piece of user-facing state actually follows that principle, not just the ones — like balance — where a wrong answer is immediately, visibly expensive.
 - **An error message is part of the system's correctness surface, not just its UX polish.** Bug 5 in Section 5.9 did not corrupt any data — the backend's authoritative rejection logic was correct throughout — but the client displayed a confidently wrong *reason* for that rejection by guessing from a single signal (budget shortfall) instead of asking the server. A message that is wrong in a way that sounds plausible is arguably worse for a demo or a real user than a generic failure, because it actively misdirects debugging effort; this is recorded as a lesson distinct from the underlying data-correctness lessons above.
 - **Live, browser-driven testing catches a category of bug that API-level and unit testing structurally cannot.** Every bug in Table 6.5 was a *gap between* two layers that were each individually reasonable in isolation — a database default that made sense until prices were rescaled, a `localStorage` priority order that made sense until two write paths could race, a client-side guess that made sense until more than one server-side rule could apply. None of them would necessarily fail an endpoint-level test asserting the endpoint's own contract, because each endpoint largely did what it claimed; the defect lived in the seam between components. This is the concrete justification, discovered rather than assumed in advance, for including Section 6.6 as its own verification method alongside the concurrency suite rather than treating it as redundant with API testing.
+- **A codebase that only ever ran on one origin can hide an entire class of bug indefinitely.** The `sameSite: 'strict'` cookie (Section 5.10) was syntactically and functionally correct for every test this project ever ran against `localhost`, because a same-origin request satisfies `sameSite: 'strict'` trivially — the defect only exists relative to a deployment topology the project had not yet adopted when the code was written. This generalises: a correctness property that depends on the deployment environment (origin, network topology, TLS termination) cannot be verified by running the application locally, no matter how thoroughly, and needs its own explicit review pass the moment that environment is due to change, rather than being assumed to transfer.
+- **A UI framework's structural rules can silently repurpose code that looks locally correct.** The `v-else`-binds-to-nearest-sibling defect (Section 5.14) is a case where every individual line of markup was valid Vue and did exactly what its own `v-if` condition said — the bug was entirely in an implicit structural relationship between two non-adjacent lines that a reader has to know to check for, not in any single expression's logic. The general caution this leaves for future work on this codebase (and any Vue codebase using `v-if`/`v-else` chains): inserting new conditional markup between an existing `v-if`/`v-else` pair is not a locally-reasoned-about change, and should prompt an explicit check of what the `v-else` is actually still paired with, not just whether the new element's own condition looks right in isolation.
+- **A feature that fails loudly and specifically when unconfigured is safer to ship incomplete than to leave unbuilt.** OAuth login (Section 5.13) was implemented and merged before real provider credentials existed for any of the three platforms, on the basis that `GET /api/auth/:provider`'s explicit environment-variable check — returning a clear `503` naming the exact unconfigured provider, rather than attempting a redirect that would fail unpredictably partway through — makes the incomplete state itself a verifiable, correct behaviour rather than a landmine. This is recorded as a deliberate design pattern worth repeating: when a feature's full verification is blocked on an external dependency outside the project's control (here, third-party developer-portal approval), design its unconfigured state to be a tested, intentional outcome rather than an unhandled one.
 
 ---
 
@@ -897,3 +1107,6 @@ Tilkov, S. and Vinoski, S. (2010) 'Node.js: Using JavaScript to Build High-Perfo
 - **Appendix D** — Screenshots of the running application (Squad, Market, Analytics, Gacha tabs). *(Insert screenshots.)*
 - **Appendix E** — `services/scoringService.js` and `services/matchdayService.js` source (Algorithm 4, Section 5.7), and the live "Chạy Matchday" result screenshot referenced in Section 6.6 (total 69 points, captained forward scoring 20).
 - **Appendix F** — Table 6.5's five live-testing bugs, cross-referenced to their exact code fixes (`routes/squad.js`'s new `POST /api/squad/captain`; `TransferMarket.vue`'s corrected `attemptBuy`; the `virtualBalance` default migration).
+- **Appendix G** — `render.yaml` Blueprint and `DEPLOY.md` setup guide (Section 5.10); screenshots of the live Render and Vercel dashboards showing a successful deployment. *(Insert screenshots.)*
+- **Appendix H** — `routes/oauth.js` and `services/oauthProviders.js` full source (Section 5.13, Table 5.2).
+- **Appendix I** — Before/after screenshots of the Transfer Market, Fixtures, and Leagues & Clubs pages (Section 5.11), and the `App.vue` diff for the `v-else` template composition fix (Section 5.14). *(Insert screenshots.)*

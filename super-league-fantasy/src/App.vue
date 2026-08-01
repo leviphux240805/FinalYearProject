@@ -3,9 +3,6 @@
     <!-- AUTH GATE - Shown when not logged in -->
     <AuthModal v-if="!store.isAuthenticated" />
 
-    <!-- WELCOME WALKTHROUGH - shown once, right after register() -->
-    <WelcomeModal v-if="store.isAuthenticated && store.showWelcomeModal" />
-
     <!-- MAIN CONTENT - Shown when logged in -->
     <template v-else>
       <header class="header">
@@ -33,10 +30,6 @@
             </div>
           </div>
           <button class="logout-btn" @click="store.logout()" title="Log out">⏏</button>
-        </div>
-
-        <div class="status-bar">
-          <span class="status-dot"></span> LIVE SERVER ACTIVE
         </div>
       </header>
 
@@ -113,6 +106,15 @@
         </div>
       </main>
     </template>
+
+    <!-- WELCOME WALKTHROUGH - shown once, right after register(). Kept as an
+         independent sibling (not part of the v-if/v-else chain above) so it
+         overlays on top of the main content instead of replacing it — and,
+         critically, so it can never accidentally become the "v-else" branch
+         for the AuthModal check (that bug made the logged-out screen render
+         BOTH AuthModal and the main content, crashing on store.currentUser
+         being null). -->
+    <WelcomeModal v-if="store.isAuthenticated && store.showWelcomeModal" />
 
     <!-- BOTTOM-RIGHT TOAST NOTIFICATION SYSTEM -->
     <div class="toast-container">
