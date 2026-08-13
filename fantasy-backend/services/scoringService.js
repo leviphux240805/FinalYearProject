@@ -71,7 +71,7 @@ function calculatePlayerMatchPoints(playerStats, position, isCaptain) {
 
   // 5. Captaincy Multiplier
   if (isCaptain) {
-    totalPoints *= 2;
+    totalPoints *= 3;
   }
 
   return totalPoints;
