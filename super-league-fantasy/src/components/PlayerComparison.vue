@@ -238,7 +238,7 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Price (Cheaper is Better)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Price',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
       { label: 'Form (last 3 matches)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
       { label: 'Distribution (Key Passes)',     v1: s1.keyPasses,              v2: s2.keyPasses,              p1wins: +s1.keyPasses > +s2.keyPasses, p2wins: +s2.keyPasses > +s1.keyPasses },
       { label: 'Reflexes (Shots)',            v1: s1.shots,                  v2: s2.shots,                  p1wins: +s1.shots > +s2.shots,         p2wins: +s2.shots > +s1.shots },
@@ -256,7 +256,7 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Price (Cheaper is Better)',    v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Price',    v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
       { label: 'Form (last 3 matches)',            v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
       { label: 'Expected Goals (xG)',       v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,              p2wins: +s2.xG > +s1.xG },
       { label: 'Expected Assists (xA)',       v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,              p2wins: +s2.xA > +s1.xA },
@@ -274,7 +274,7 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Price (Cheaper is Better)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Price',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
       { label: 'Form (last 3 matches)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
       { label: 'Expected Goals (xG)',      v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,              p2wins: +s2.xG > +s1.xG },
       { label: 'Expected Assists (xA)',     v1: s1.xA,                     v2: s2.xA,                     p1wins: +s1.xA > +s2.xA,              p2wins: +s2.xA > +s1.xA },
@@ -292,7 +292,7 @@ const POSITION_CONFIG = {
       valuePct(p),
     ],
     tableRowsFn: (p1, s1, p2, s2) => [
-      { label: 'Price (Cheaper is Better)',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
+      { label: 'Price',  v1: `$${getPlayerPrice(p1)}M`, v2: `$${getPlayerPrice(p2)}M`, p1wins: getPlayerPrice(p1) < getPlayerPrice(p2), p2wins: getPlayerPrice(p2) < getPlayerPrice(p1) },
       { label: 'Form (last 3 matches)',          v1: (p1.form||[]).join(' - '), v2: (p2.form||[]).join(' - '), p1wins: getFormScore(p1.form) > getFormScore(p2.form), p2wins: getFormScore(p2.form) > getFormScore(p1.form) },
       { label: 'Expected Goals (xG)',      v1: s1.xG,                     v2: s2.xG,                     p1wins: +s1.xG > +s2.xG,   p2wins: +s2.xG > +s1.xG },
       { label: 'Shots on Target',         v1: s1.shots,                  v2: s2.shots,                  p1wins: +s1.shots > +s2.shots, p2wins: +s2.shots > +s1.shots },
