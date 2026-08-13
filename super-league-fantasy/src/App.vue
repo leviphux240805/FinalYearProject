@@ -259,26 +259,6 @@ body {
   -webkit-text-fill-color: transparent;
   letter-spacing: 1px;
 }
-.status-bar {
-  font-size: 12px;
-  font-weight: bold;
-  color: #2bcbba;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(43, 203, 186, 0.1);
-  padding: 6px 12px;
-  border-radius: 20px;
-}
-.status-dot {
-  width: 8px;
-  height: 8px;
-  background-color: #2bcbba;
-  border-radius: 50%;
-  box-shadow: 0 0 10px #2bcbba;
-  animation: pulse 1.5s infinite;
-}
-
 /* Main layout */
 .main-content {
   display: flex;
@@ -369,13 +349,6 @@ body {
 .toast-anim-enter-active, .toast-anim-leave-active { transition: all 0.4s ease; }
 .toast-anim-enter-from { opacity: 0; transform: translateX(100px); }
 .toast-anim-leave-to { opacity: 0; transform: translateY(20px); }
-
-/* Live indicator blink effect */
-@keyframes pulse {
-  0% { transform: scale(0.95); opacity: 0.5; }
-  50% { transform: scale(1.2); opacity: 1; }
-  100% { transform: scale(0.95); opacity: 0.5; }
-}
 
 @media (max-width: 1380px) {
   .main-content {

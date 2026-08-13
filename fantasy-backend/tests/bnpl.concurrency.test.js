@@ -13,6 +13,15 @@ const { PrismaClient } = require('@prisma/client');
 const { app } = require('../server');
 const transferService = require('../services/transferService');
 
+// DATABASE_URL points at the hosted Render Postgres (Oregon), not localhost —
+// each query here is a real round trip over the public internet, not an
+// in-memory or local-loopback call. Jest's default 5000ms per-test timeout
+// is tuned for local databases and is too tight for that latency, especially
+// test 3's 10 sequential-over-the-wire HTTP requests. This is a timeout
+// budget issue, not a correctness issue — Algorithm 1 itself still completes
+// correctly, just not within 5s end-to-end from this machine.
+jest.setTimeout(30000);
+
 const prisma = new PrismaClient();
 
 async function makeUser(prefix, balance) {

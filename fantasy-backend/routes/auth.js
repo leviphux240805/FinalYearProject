@@ -133,9 +133,24 @@ try {
 }
 
 async function checkDbAvailable() {
-  if (useInMemory) return false;
+  // BUG FIX: this used to short-circuit on a cached `useInMemory` flag that,
+  // once tripped by a single transient failure, never got un-set for the
+  // rest of the process's lifetime — even after PostgreSQL became reachable
+  // again moments later. On Render's free tier, a cold-started backend
+  // (spun back up after ~15 minutes idle, e.g. a user's session simply
+  // timing out — see the SESSION EXPIRY note in store.js) is exactly the
+  // situation where the first query can transiently fail before the
+  // connection pool has finished establishing, permanently flipping this
+  // process into "in-memory" mode. From that point on, every login for an
+  // account that actually exists in Postgres was checked against an empty
+  // in-memory Map instead — a correct password reported as "Incorrect
+  // username or password" for every account, until the process happened to
+  // restart again. checkDbAvailable() now always re-tests the live
+  // connection (no permanent latch) and self-heals the moment it succeeds.
+  if (!prisma) return false;
   try {
     await prisma.$queryRaw`SELECT 1`;
+    useInMemory = false;
     return true;
   } catch {
     useInMemory = true;

@@ -252,12 +252,22 @@ const onDrop = (event, targetId) => {
   border: 2px solid rgba(255,255,255,0.6);
   border-radius: 12px;
   height: 520px;
-  padding: 10px 0;
+  /* Extra top padding + overflow: visible (was 10px + overflow: hidden) —
+     the live-badge above a player's shirt can now be up to 2 lines tall
+     (see .live-badge below), and the FWD row renders first/topmost, so
+     without this the badge for a top-row player (e.g. the Captain's
+     "x2 Captain" tag) was clipped clean off by the pitch's own boundary.
+     The background stripes + halfway-line/center-circle pseudo-elements
+     still clip to the rounded corners on their own (background-clip is
+     border-radius-aware even without overflow: hidden), so this only
+     stops CHILD content (the badges) from being cut off, not the pitch
+     art itself. */
+  padding: 58px 0 10px 0;
   display: flex;
   flex-direction: column;
   justify-content: space-around;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
 }
 .pitch::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; border-top: 2px solid rgba(255,255,255,0.3); }
@@ -351,8 +361,35 @@ const onDrop = (event, targetId) => {
 }
 .player-slot:hover .sell-btn { opacity: 1; }
 
-.live-badge { position: absolute; top: -25px; left: 50%; transform: translateX(-50%); background: #ff4757; color: white; padding: 4px 8px; font-size: 11px; font-weight: bold; border-radius: 6px; white-space: nowrap; z-index: 100; box-shadow: 0 4px 10px rgba(255,71,87,0.5); animation: popUp 0.3s forwards; }
-@keyframes popUp { 0% { top: 0; opacity: 0; } 100% { top: -25px; opacity: 1; } }
+/* Anchored to the BOTTOM of the badge (bottom: 100% of the player-kit,
+   i.e. flush against its top edge) rather than a fixed "top: -25px" —
+   with multiple stat segments now joined by "  •  " (goal + assist +
+   clean sheet + captain can all apply to the same player at once), the
+   badge can wrap onto a second line. Anchoring from the bottom means it
+   always sits flush above the shirt and grows UPWARD as it wraps, instead
+   of a fixed top offset that assumed a single line and let taller content
+   spill past the intended position. */
+.live-badge {
+  position: absolute;
+  bottom: 100%;
+  margin-bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ff4757;
+  color: white;
+  padding: 4px 9px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  font-weight: bold;
+  border-radius: 6px;
+  white-space: normal;
+  max-width: 168px;
+  text-align: center;
+  z-index: 100;
+  box-shadow: 0 4px 10px rgba(255,71,87,0.5);
+  animation: popUp 0.3s forwards;
+}
+@keyframes popUp { 0% { margin-bottom: -6px; opacity: 0; } 100% { margin-bottom: 8px; opacity: 1; } }
 
 /* "Bounce into place" when a player appears in a new slot (starter <->
    bench) — slight overshoot then settle, more of a snap-into-place feel

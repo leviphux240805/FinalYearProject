@@ -114,7 +114,7 @@ router.post('/reset', authenticateToken, async (req, res) => {
       await tx.user.update({ where: { id: userId }, data: { virtualBalance: newBalance } });
 
       return { virtualBalance: newBalance, penaltyPoints: user.penaltyPoints };
-    });
+    }, { maxWait: 10000, timeout: 20000 }); // widened from Prisma's 2000/5000ms defaults for the hosted (non-localhost) DB
 
     console.log(`[Squad/Reset] User ${userId}: reset GW${gameweek}, refunded to $${result.virtualBalance}M`);
     res.json({ success: true, newBalance: result.virtualBalance, penaltyPoints: result.penaltyPoints });
@@ -267,7 +267,8 @@ router.post('/bench-order', authenticateToken, async (req, res) => {
           where: { squadId: squad.id, playerId },
           data: { benchOrder: index + 1 },
         })
-      )
+      ),
+      { timeout: 20000 } // widened from Prisma's 5000ms default for the hosted (non-localhost) DB
     );
 
     res.json({ success: true, order });

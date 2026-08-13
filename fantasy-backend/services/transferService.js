@@ -158,14 +158,23 @@ async function _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock
   return { virtualBalance: Number(updated.virtualBalance), penaltyPoints: updated.penaltyPoints };
 }
 
+// maxWait/timeout are widened from Prisma's defaults (2000ms / 5000ms) —
+// this transaction does several sequential round trips (row lock, 3 reads,
+// club/position/size checks, 1-2 writes, ledger inserts, squad upsert, a
+// final read), and DATABASE_URL points at a hosted Postgres instance, not
+// localhost, so real network latency counts against this budget too. Without
+// this, the transaction can be force-closed by Prisma itself mid-way
+// (independent of any Jest test timeout) under real-world latency.
+const TX_OPTS = { maxWait: 10000, timeout: 20000 };
+
 async function executeBnplTransfer({ userId, playerIdToBuy, playerIdToSell = null }) {
-  return prisma.$transaction(tx => _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock: true }));
+  return prisma.$transaction(tx => _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock: true }), TX_OPTS);
 }
 
 // Test-only: reproduces the race condition Algorithm 1 is designed to
 // prevent, by skipping the FOR UPDATE lock. Never call from route handlers.
 async function __unsafeExecuteForTesting({ userId, playerIdToBuy, playerIdToSell = null, raceDelayMs = 50 }) {
-  return prisma.$transaction(tx => _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock: false, raceDelayMs }));
+  return prisma.$transaction(tx => _runTransfer(tx, { userId, playerIdToBuy, playerIdToSell, useLock: false, raceDelayMs }), TX_OPTS);
 }
 
 async function executeSell({ userId, playerId }) {
@@ -198,7 +207,7 @@ async function executeSell({ userId, playerId }) {
       select: { virtualBalance: true, penaltyPoints: true }
     });
     return { virtualBalance: Number(updated.virtualBalance), penaltyPoints: updated.penaltyPoints, sellPrice };
-  });
+  }, TX_OPTS);
 }
 
 module.exports = {

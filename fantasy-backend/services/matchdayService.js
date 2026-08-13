@@ -257,7 +257,7 @@ async function runMatchday({ userId, gameweek = DEFAULT_GAMEWEEK }) {
     });
 
     return { gameweek, totalPoints, breakdown, effectiveCaptainPlayerId };
-  });
+  }, { maxWait: 10000, timeout: 20000 }); // widened from Prisma's 2000/5000ms defaults — DATABASE_URL is a hosted instance, not localhost, and this transaction does a full squad read + per-player writes in one round trip budget
 }
 
 module.exports = {

@@ -483,16 +483,24 @@ export const globalStore = reactive({
         player.livePoints = entry.points;
         player.lastMatchStats = entry.stats;
 
+        // Each stat becomes its own labelled segment joined with a visible
+        // "•" separator (not just a space) — previously this was just an
+        // emoji + "x1" with a bare space between segments, so if the emoji
+        // glyph failed to render (missing font on the presenting machine),
+        // multiple badges collapsed into unreadable run-together text like
+        // "x1 x1 Clean sheet". The "•" and word labels keep it legible even
+        // with zero emoji support.
         const badges = [];
         if (entry.stats) {
           if (entry.stats.minutesPlayed === 0) badges.push('Did not play');
-          if (entry.stats.goals) badges.push(`⚽x${entry.stats.goals}`);
-          if (entry.stats.assists) badges.push(`🅰️x${entry.stats.assists}`);
+          if (entry.stats.goals) badges.push(`⚽ Goal x${entry.stats.goals}`);
+          if (entry.stats.assists) badges.push(`🅰️ Assist x${entry.stats.assists}`);
           if (entry.stats.cleanSheet) badges.push('🧤 Clean sheet');
-          if (entry.stats.yellowCards) badges.push('🟨'.repeat(entry.stats.yellowCards));
-          if (entry.stats.redCards) badges.push('🟥');
+          if (entry.stats.yellowCards) badges.push(`🟨 Yellow x${entry.stats.yellowCards}`);
+          if (entry.stats.redCards) badges.push('🟥 Red card');
         }
-        player.liveEvent = badges.join(' ') + (entry.isCaptain ? ' (x2 Captain)' : '');
+        if (entry.isCaptain) badges.push('★ x2 Captain');
+        player.liveEvent = badges.join('  •  ');
 
         this.eventFeed.unshift({
           id: `${Date.now()}_${entry.playerId}`,
@@ -723,7 +731,7 @@ export const globalStore = reactive({
           const isCaptain = player.id === this.captainId;
           const finalPoints = isCaptain ? (data.pointsAdded * 2) : data.pointsAdded;
           player.livePoints += finalPoints;
-          player.liveEvent = isCaptain ? `${data.message} (x2 Captain)` : data.message;
+          player.liveEvent = isCaptain ? `${data.message}  •  ★ x2 Captain` : data.message;
           this.eventFeed.unshift({ id: Date.now(), time: new Date().toLocaleTimeString(), text: `${player.name} just earned ${finalPoints} points!` });
           playSound(soundGoal); // FEATURE 3: goal sound
           this.addToast(`🔥 LIVE: ${player.name} +${finalPoints} points!`, 'success');
