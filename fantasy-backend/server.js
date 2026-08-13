@@ -66,16 +66,35 @@ app.use((req, res, next) => {
 // ============================================================
 // CORS - restricted to known frontend origin(s), not left wide open.
 // FRONTEND_ORIGIN can be a comma-separated list (e.g. dev + prod URLs).
+//
+// PREVIEW-DEPLOY FIX: Vercel issues a NEW preview URL with a random hash
+// (https://<project>-<hash>-<team-slug>.vercel.app) on every single push —
+// unlike the stable production URL, it's never the same twice. Originally
+// FRONTEND_ORIGIN only listed one specific preview URL, so it silently broke
+// again the next time Vercel generated a different hash (exactly the CORS
+// bug documented in the defense deck — it recurred during prep because a new
+// preview deployment was made after that fix). Rather than having to hand-
+// update the Render env var after every single Vercel push, any preview URL
+// matching THIS project's own Vercel slug is now allowed via regex, while
+// still rejecting every other origin on the internet.
 // ============================================================
 const allowedOrigins = (process.env.FRONTEND_ORIGIN || 'http://localhost:5173')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
 
+// Matches https://final-year-project-<any-hash>-leviphux240805s-projects.vercel.app
+// — i.e. any preview deployment of this specific Vercel project, not just
+// the one exact URL that happened to be current when FRONTEND_ORIGIN was
+// last set. Does NOT match other Vercel projects/users' preview URLs.
+const VERCEL_PREVIEW_ORIGIN_REGEX = /^https:\/\/final-year-project-[a-z0-9]+-leviphux240805s-projects\.vercel\.app$/;
+
 app.use(cors({
   origin(origin, callback) {
     // Allow same-origin/non-browser requests (no Origin header, e.g. curl, mobile) through.
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.includes(origin) || VERCEL_PREVIEW_ORIGIN_REGEX.test(origin)) {
+      return callback(null, true);
+    }
     console.warn(`[CORS] Blocked request from unlisted origin: ${origin}`);
     return callback(new Error('Not allowed by CORS'));
   },

@@ -67,14 +67,19 @@
         <!-- Confirm Password (Register only) -->
         <div v-if="activeTab === 'register'" class="field-group">
           <label>Confirm Password</label>
-          <input
-            v-model="form.confirmPassword"
-            type="password"
-            placeholder="Re-enter your password"
-            autocomplete="new-password"
-            :disabled="isLoading"
-            required
-          />
+          <div class="password-wrapper">
+            <input
+              v-model="form.confirmPassword"
+              :type="showConfirmPassword ? 'text' : 'password'"
+              placeholder="Re-enter your password"
+              autocomplete="new-password"
+              :disabled="isLoading"
+              required
+            />
+            <button type="button" class="toggle-pw" @click="showConfirmPassword = !showConfirmPassword">
+              {{ showConfirmPassword ? '🙈' : '👁️' }}
+            </button>
+          </div>
           <span v-if="form.confirmPassword && form.password !== form.confirmPassword" class="field-error">
             Passwords don't match!
           </span>
@@ -124,6 +129,12 @@ const activeTab    = ref('login');
 const isLoading    = ref(false);
 const errorMsg     = ref('');
 const showPassword = ref(false);
+// Separate ref from showPassword — the two fields toggle independently, so
+// revealing "Confirm Password" doesn't also reveal "Password" and vice
+// versa. Previously this ref didn't exist at all: the Confirm Password
+// input was hard-coded to type="password" with no wrapper/button, so it had
+// no toggle whatsoever (not "broken" so much as never implemented).
+const showConfirmPassword = ref(false);
 
 const form = ref({
   username: '',
